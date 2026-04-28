@@ -14,8 +14,16 @@ const baseEmbed = (title, color = config.theme.primary) =>
     .setFooter({ text: config.theme.footer })
     .setTimestamp();
 
+const normalizeErrorDescription = (description) => {
+  if (typeof description === 'string' && description.trim()) return description.trim();
+  if (description instanceof Error && typeof description.message === 'string' && description.message.trim()) {
+    return description.message.trim();
+  }
+  return 'Si e verificato un errore durante l operazione.';
+};
+
 const errorEmbed = (title, description) =>
-  baseEmbed(title, config.theme.error).setDescription(description);
+  baseEmbed(title, config.theme.error).setDescription(normalizeErrorDescription(description));
 
 const missingPermsEmbed = (missing) =>
   baseEmbed('Permessi Mancanti', config.theme.warning).setDescription(

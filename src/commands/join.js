@@ -28,7 +28,8 @@ module.exports = {
         components
       });
     } catch (error) {
-      await interaction.reply({ embeds: [errorEmbed('Join Fallito', error.message)], ephemeral: true });
+      const message = typeof error?.message === 'string' && error.message.trim() ? error.message : 'Join fallito.';
+      await interaction.reply({ embeds: [errorEmbed('Join Fallito', message)], ephemeral: true });
     }
   }
 };
