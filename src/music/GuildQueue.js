@@ -17,6 +17,8 @@ class GuildQueue {
     this.startedAt = 0;
     this.positionOffsetMs = 0;
     this.currentSessionId = 0;
+    this.currentStarted = false;
+    this.trackStartTimeout = null;
     this.nowPlayingUpdateTimer = null;
     this.joinedByUserId = null;
     this.joinedAt = 0;
@@ -36,6 +38,13 @@ class GuildQueue {
     if (this.nowPlayingUpdateTimer) {
       clearInterval(this.nowPlayingUpdateTimer);
       this.nowPlayingUpdateTimer = null;
+    }
+  }
+
+  clearTrackStartTimeout() {
+    if (this.trackStartTimeout) {
+      clearTimeout(this.trackStartTimeout);
+      this.trackStartTimeout = null;
     }
   }
 }

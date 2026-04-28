@@ -38,6 +38,7 @@ class MusicManager {
   }
 
   static ALONE_DISCONNECT_MS = 10000;
+  static TRACK_START_TIMEOUT_MS = 12000;
 
   attachShoukakuEvents() {
     this.shoukaku.on('ready', (name) => logger.info(`Lavalink node ready: ${name}`));
@@ -65,6 +66,11 @@ class MusicManager {
     if (!queue.current) return 0;
 
     const duration = queue.current.duration || 0;
+    const playerPosition = Number(queue.player?.position);
+    if (Number.isFinite(playerPosition) && playerPosition >= 0) {
+      return duration > 0 ? Math.min(playerPosition, duration) : playerPosition;
+    }
+
     const base = Math.max(0, queue.positionOffsetMs || 0);
     const elapsed = queue.paused ? 0 : Math.max(0, Date.now() - (queue.startedAt || Date.now()));
     const computed = base + elapsed;
@@ -337,6 +343,7 @@ class MusicManager {
 
     queue.current = replacement;
     queue.currentSessionId += 1;
+    queue.currentStarted = false;
     this.resetPositionClock(queue, 0);
     queue.paused = false;
 
@@ -354,6 +361,7 @@ class MusicManager {
           encoded: replacement.encoded
         }
       });
+      this.armTrackStartTimeout(queue, queue.currentSessionId);
       return true;
     } catch (error) {
       logger.warn(`Fallback play failed for guild ${queue.guildId}: ${error.message || error}`);
@@ -391,18 +399,33 @@ class MusicManager {
     }
 
     const isDirectUrl = this.isUrl(query);
-    const identifier = isDirectUrl ? query : `ytmsearch:${query}`;
-    const result = await this.searchLavalink(node, identifier);
-    const mappedTracks = result.tracks.map((t) => this.buildTrack(t, requestedBy));
+    if (isDirectUrl) {
+      const result = await this.searchLavalink(node, query);
+      const mappedTracks = result.tracks.map((t) => this.buildTrack(t, requestedBy));
 
-    // For plain text queries, queue only the first match.
-    // Full lists are kept for explicit playlist/album URLs.
-    const tracks = isDirectUrl ? mappedTracks : mappedTracks.slice(0, 1);
+      return {
+        tracks: mappedTracks,
+        playlistName: result.playlistName,
+        sourceKind: result.playlistName ? 'playlist' : 'track',
+        requestedCount: mappedTracks.length,
+        skippedCount: 0
+      };
+    }
+
+    const ytm = await this.searchLavalink(node, `ytmsearch:${query}`);
+    let candidates = ytm.tracks;
+    if (!candidates.length) {
+      const yt = await this.searchLavalink(node, `ytsearch:${query}`);
+      candidates = yt.tracks;
+    }
+
+    const mappedTracks = candidates.map((t) => this.buildTrack(t, requestedBy));
+    const tracks = mappedTracks.slice(0, 1);
 
     return {
       tracks,
-      playlistName: result.playlistName,
-      sourceKind: result.playlistName ? 'playlist' : 'track',
+      playlistName: null,
+      sourceKind: 'track',
       requestedCount: tracks.length,
       skippedCount: 0
     };
@@ -467,16 +490,20 @@ class MusicManager {
 
   attachPlayerEvents(queue) {
     queue.player.on('start', async () => {
+      queue.currentStarted = true;
+      queue.clearTrackStartTimeout();
       this.resetPositionClock(queue, 0);
       queue.paused = false;
       await this.postNowPlaying(queue);
     });
 
     queue.player.on('end', async (event) => {
+      queue.clearTrackStartTimeout();
       await this.onTrackEnd(queue, event?.reason);
     });
 
     queue.player.on('exception', async (event) => {
+      queue.clearTrackStartTimeout();
       logger.error(`Track exception in guild ${queue.guildId}: ${event?.exception?.message || 'Unknown error'}`);
       await this.safeTextSend(queue.textChannelId, {
         embeds: [errorEmbed('Errore Traccia', 'Il brano corrente ha generato un errore. Passo al prossimo...')]
@@ -485,11 +512,34 @@ class MusicManager {
     });
 
     queue.player.on('stuck', async () => {
+      queue.clearTrackStartTimeout();
       await this.safeTextSend(queue.textChannelId, {
         embeds: [errorEmbed('Traccia Bloccata', 'La traccia si e bloccata. Passo al prossimo brano...')]
       });
       await this.onTrackEnd(queue, 'loadFailed');
     });
+  }
+
+  armTrackStartTimeout(queue, expectedSessionId) {
+    queue.clearTrackStartTimeout();
+    queue.trackStartTimeout = setTimeout(async () => {
+      const latest = this.queues.get(queue.guildId);
+      if (!latest) return;
+      if (!latest.current || latest.currentSessionId !== expectedSessionId) return;
+      if (latest.currentStarted) return;
+
+      await this.safeTextSend(latest.textChannelId, {
+        embeds: [
+          baseEmbed('Recupero Traccia', config.theme.warning).setDescription(
+            `Il brano **${latest.current.title}** non e partito in tempo utile. Provo a recuperarlo...`
+          )
+        ]
+      });
+
+      await this.onTrackEnd(latest, 'loadFailed');
+    }, MusicManager.TRACK_START_TIMEOUT_MS);
+
+    queue.trackStartTimeout.unref?.();
   }
 
   async onTrackEnd(queue, reason = 'finished') {
@@ -498,8 +548,20 @@ class MusicManager {
     if (reason === 'replaced') return;
 
     const finishedTrack = queue.current;
+    const playedMs = this.getPlayerPosition(queue);
 
     if (reason === 'loadFailed' && finishedTrack) {
+      const recovered = await this.tryRecoverFailedTrack(queue, finishedTrack);
+      if (recovered) return;
+    }
+
+    const suspiciousInstantFinish =
+      reason === 'finished' &&
+      finishedTrack &&
+      Number(finishedTrack.duration || 0) > 15000 &&
+      playedMs > 0 &&
+      playedMs < 3500;
+    if (suspiciousInstantFinish) {
       const recovered = await this.tryRecoverFailedTrack(queue, finishedTrack);
       if (recovered) return;
     }
@@ -513,6 +575,7 @@ class MusicManager {
     }
 
     queue.current = null;
+    queue.currentStarted = false;
     queue.paused = false;
     queue.positionOffsetMs = 0;
     queue.startedAt = 0;
@@ -532,6 +595,7 @@ class MusicManager {
 
     queue.current = next;
     queue.currentSessionId += 1;
+    queue.currentStarted = false;
 
     try {
       await queue.player.playTrack({
@@ -539,9 +603,11 @@ class MusicManager {
           encoded: next.encoded
         }
       });
+      this.armTrackStartTimeout(queue, queue.currentSessionId);
     } catch (error) {
       logger.error('Failed to play track.', error);
       queue.current = null;
+      queue.currentStarted = false;
       await this.playNext(queue);
     }
   }
@@ -625,6 +691,7 @@ class MusicManager {
     try {
       queue.clearDisconnectTimer();
       queue.clearNowPlayingTimer();
+      queue.clearTrackStartTimeout();
       if (deleteNowPlayingMessage && queue.nowPlayingMessageId) {
         const channel = await this.client.channels.fetch(queue.textChannelId).catch(() => null);
         if (channel && channel.isTextBased()) {
@@ -782,10 +849,12 @@ class MusicManager {
     queue.tracks = [];
     const hadCurrent = Boolean(queue.current);
     queue.current = null;
+    queue.currentStarted = false;
     queue.paused = false;
     queue.positionOffsetMs = 0;
     queue.startedAt = 0;
     queue.clearNowPlayingTimer();
+    queue.clearTrackStartTimeout();
 
     if (hadCurrent) {
       await queue.player.stopTrack().catch(() => null);
