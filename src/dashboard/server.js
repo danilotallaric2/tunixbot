@@ -37,6 +37,7 @@ const buildStateFromQueue = (client, queue) => {
       loop: 'off',
       paused: false,
       progressMs: 0,
+      progressSampledAtMs: Date.now(),
       progressText: '0:00',
       totalMs: 0
     };
@@ -74,6 +75,7 @@ const buildStateFromQueue = (client, queue) => {
     filter: queue.filter || 'clear',
     paused: queue.paused,
     progressMs: position,
+    progressSampledAtMs: Date.now(),
     progressText: formatDuration(position),
     totalMs: queue.current?.duration || 0
   };

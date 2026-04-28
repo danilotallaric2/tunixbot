@@ -59,9 +59,10 @@ const effectsCloseBtn = document.getElementById('effectsCloseBtn');
 
 const loopModes = ['off', 'song', 'queue'];
 const LYRICS_SYNC_DELAY_MS = 0;
-const SERVER_PROGRESS_BACKWARD_TOLERANCE_MS = 350;
-const SERVER_PROGRESS_HARD_RESET_BACKWARD_MS = 3500;
-const SERVER_PROGRESS_MAX_SOFT_BACKSTEP_MS = 120;
+const PROGRESS_HARD_RESYNC_MS = 2200;
+const PROGRESS_SOFT_CORRECTION_STEP_MS = 260;
+const PROGRESS_SOFT_FORWARD_DRIFT_MS = 320;
+const PROGRESS_SOFT_BACKWARD_DRIFT_MS = 900;
 let sessionInfo = null;
 let state = null;
 let canControl = false;
@@ -70,6 +71,7 @@ let localProgressTimer = null;
 let progressAnchorMs = 0;
 let progressAnchorTs = 0;
 let progressTrackKey = null;
+let progressLastRenderedMs = 0;
 let lyricsOpen = false;
 let lyricsLines = [];
 let lyricsTrackKey = null;
@@ -146,65 +148,84 @@ const getTrackKey = (s) => {
   return `${s.current.sessionId || 0}|${s.current.title}|${s.current.author}|${s.current.duration}|${s.current.url || ''}`;
 };
 
+const clampProgress = (valueMs, durationMs) => {
+  const value = Math.max(0, Number(valueMs || 0));
+  if (!durationMs || durationMs <= 0) return value;
+  return Math.min(value, durationMs);
+};
+
+const resetProgressAnchor = (valueMs, durationMs) => {
+  progressAnchorMs = clampProgress(valueMs, durationMs);
+  progressAnchorTs = performance.now();
+  progressLastRenderedMs = progressAnchorMs;
+};
+
+const getRawLiveProgressMs = () => {
+  if (!state?.current) return 0;
+
+  const duration = state.current.duration || 0;
+  if (state.paused) return clampProgress(progressAnchorMs, duration);
+
+  const elapsed = Math.max(0, performance.now() - progressAnchorTs);
+  return clampProgress(progressAnchorMs + elapsed, duration);
+};
+
 const syncProgressAnchorFromServer = (s) => {
-  const now = Date.now();
   const trackKey = getTrackKey(s);
 
   if (!trackKey || !s.current) {
     progressTrackKey = null;
-    progressAnchorMs = 0;
-    progressAnchorTs = now;
+    resetProgressAnchor(0, 0);
     return;
   }
 
   const duration = s.current.duration || 0;
-  const serverMsRaw = Math.max(0, Number(s.progressMs || 0));
-  const serverMs = duration > 0 ? Math.min(serverMsRaw, duration) : serverMsRaw;
+  const serverMs = clampProgress(s.progressMs, duration);
+  const sampledAtMs = Number(s.progressSampledAtMs || Date.now());
+  const transitMs = Math.max(0, Math.min(5000, Date.now() - sampledAtMs));
+  const serverAtClientMs = s.paused ? serverMs : clampProgress(serverMs + transitMs, duration);
 
   if (progressTrackKey !== trackKey) {
     progressTrackKey = trackKey;
-    progressAnchorMs = serverMs;
-    progressAnchorTs = now;
+    resetProgressAnchor(serverAtClientMs, duration);
     return;
   }
 
   if (s.paused) {
-    progressAnchorMs = serverMs;
-    progressAnchorTs = now;
+    resetProgressAnchor(serverMs, duration);
     return;
   }
 
-  // Keep progress monotonic to avoid lyrics jumping backwards due jittery server samples.
-  const elapsed = Math.max(0, now - progressAnchorTs);
-  const liveBeforeSync = (duration > 0 ? Math.min(progressAnchorMs + elapsed, duration) : progressAnchorMs + elapsed);
-  const backwardDelta = liveBeforeSync - serverMs;
+  const liveNowMs = getRawLiveProgressMs();
+  const driftMs = serverAtClientMs - liveNowMs;
 
-  if (backwardDelta > SERVER_PROGRESS_HARD_RESET_BACKWARD_MS) {
-    // Real backward seek/restart: trust server hard reset.
-    progressAnchorMs = serverMs;
-    progressAnchorTs = now;
+  // Strong drift -> hard resync (seek, restart, big desync).
+  if (Math.abs(driftMs) >= PROGRESS_HARD_RESYNC_MS) {
+    resetProgressAnchor(serverAtClientMs, duration);
     return;
   }
 
-  if (backwardDelta > SERVER_PROGRESS_BACKWARD_TOLERANCE_MS) {
-    // Small backward jitter: ignore to keep lyrics smooth and monotonic.
+  // Tiny drift -> keep local monotonic clock.
+  if (driftMs <= PROGRESS_SOFT_FORWARD_DRIFT_MS && driftMs >= -PROGRESS_SOFT_BACKWARD_DRIFT_MS) {
     return;
   }
 
-  // Tiny backward adjustments are clamped to avoid visible line "bounce".
-  progressAnchorMs = Math.max(serverMs, liveBeforeSync - SERVER_PROGRESS_MAX_SOFT_BACKSTEP_MS);
-  progressAnchorTs = now;
+  // Medium drift -> nudge smoothly, no jump.
+  const correction = Math.sign(driftMs) * Math.min(Math.abs(driftMs), PROGRESS_SOFT_CORRECTION_STEP_MS);
+  resetProgressAnchor(liveNowMs + correction, duration);
 };
 
 const getLiveProgressMs = () => {
+  const live = getRawLiveProgressMs();
   if (!state?.current) return 0;
+  if (state.paused) {
+    progressLastRenderedMs = live;
+    return live;
+  }
 
-  const duration = state.current.duration || 0;
-  if (state.paused) return duration > 0 ? Math.min(progressAnchorMs, duration) : progressAnchorMs;
-
-  const elapsed = Math.max(0, Date.now() - progressAnchorTs);
-  const live = progressAnchorMs + elapsed;
-  return duration > 0 ? Math.min(live, duration) : live;
+  const monotonic = Math.max(progressLastRenderedMs, live);
+  progressLastRenderedMs = monotonic;
+  return monotonic;
 };
 
 const parseSyncedLyrics = (raw) => {
@@ -759,16 +780,14 @@ queueList.addEventListener('click', async (event) => {
 
 seekRange.addEventListener('change', () => {
   if (!state?.current) return;
-  progressAnchorMs = Number(seekRange.value);
-  progressAnchorTs = Date.now();
+  resetProgressAnchor(Number(seekRange.value), state.current.duration || 0);
   renderProgressOnly();
   control('seek', Number(seekRange.value));
 });
 
 lyricsSeekRange.addEventListener('change', () => {
   if (!state?.current) return;
-  progressAnchorMs = Number(lyricsSeekRange.value);
-  progressAnchorTs = Date.now();
+  resetProgressAnchor(Number(lyricsSeekRange.value), state.current.duration || 0);
   renderProgressOnly();
   control('seek', Number(lyricsSeekRange.value));
 });
