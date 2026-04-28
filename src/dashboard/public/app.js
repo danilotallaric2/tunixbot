@@ -535,14 +535,22 @@ const enqueue = async (query) => {
   try {
     ensureCanControl();
     setStatus('Aggiunta in coda...');
-    await api('/api/play', {
+    const payload = await api('/api/play', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query })
     });
 
     await refreshSession();
-    setStatus('Brano aggiunto');
+    const added = Number(payload?.result?.addedCount || 0);
+    const skipped = Number(payload?.result?.skippedCount || 0);
+    if (skipped > 0) {
+      setStatus(`Aggiunti ${added} brani, saltati ${skipped} (non trovati in sorgente audio)`);
+    } else if (added > 1) {
+      setStatus(`Aggiunti ${added} brani in coda`);
+    } else {
+      setStatus('Brano aggiunto');
+    }
   } catch (error) {
     setStatus(error.message, true);
   }

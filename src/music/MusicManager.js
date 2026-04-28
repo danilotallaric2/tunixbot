@@ -130,20 +130,122 @@ class MusicManager {
     return normalized;
   }
 
+  normalizeCompareText(value) {
+    return String(value || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  cleanSpotifyTitle(title) {
+    return String(title || '')
+      .replace(/\((feat|ft)\.?[^)]*\)/gi, '')
+      .replace(/\[(feat|ft)\.?[^\]]*\]/gi, '')
+      .replace(/\((official|audio|video|lyrics?|live|remaster(ed)?|sped up|slowed)[^)]*\)/gi, '')
+      .replace(/\[(official|audio|video|lyrics?|live|remaster(ed)?|sped up|slowed)[^\]]*\]/gi, '')
+      .replace(/\s+-\s+(remaster(ed)?|live|radio edit|acoustic).*$/i, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  buildSpotifySearchQueries(spotifyTrack) {
+    const primaryArtist = String(spotifyTrack.author || '').split(',')[0].trim();
+    const cleanTitle = this.cleanSpotifyTitle(spotifyTrack.title);
+    const rawTitle = String(spotifyTrack.title || '').trim();
+
+    const queries = [
+      `ytmsearch:${rawTitle} ${spotifyTrack.author}`,
+      `ytsearch:${rawTitle} ${spotifyTrack.author}`,
+      `ytmsearch:${cleanTitle} ${primaryArtist}`,
+      `ytsearch:${cleanTitle} ${primaryArtist}`,
+      `ytmsearch:${cleanTitle}`,
+      `ytsearch:${cleanTitle}`
+    ];
+
+    const unique = [];
+    const seen = new Set();
+    for (const q of queries) {
+      const key = this.normalizeCompareText(q);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      unique.push(q);
+    }
+
+    return unique;
+  }
+
+  scoreSpotifyCandidate(rawTrack, spotifyTrack) {
+    const info = rawTrack.info || {};
+    const candidateTitle = this.normalizeCompareText(info.title);
+    const candidateAuthor = this.normalizeCompareText(info.author);
+    const cleanTitle = this.normalizeCompareText(this.cleanSpotifyTitle(spotifyTrack.title));
+    const primaryArtist = this.normalizeCompareText(String(spotifyTrack.author || '').split(',')[0].trim());
+    const spotifyDuration = Number(spotifyTrack.duration || 0);
+    const candidateDuration = Number(info.length || 0);
+
+    let score = 0;
+
+    if (cleanTitle && candidateTitle.includes(cleanTitle)) score += 55;
+    else if (cleanTitle) {
+      const titleTokens = cleanTitle.split(' ').filter(Boolean);
+      const matched = titleTokens.filter((t) => candidateTitle.includes(t)).length;
+      if (titleTokens.length) score += Math.floor((matched / titleTokens.length) * 40);
+    }
+
+    if (primaryArtist && candidateAuthor.includes(primaryArtist)) score += 28;
+
+    if (spotifyDuration > 0 && candidateDuration > 0) {
+      const diff = Math.abs(candidateDuration - spotifyDuration);
+      if (diff <= 3000) score += 24;
+      else if (diff <= 7000) score += 16;
+      else if (diff <= 12000) score += 10;
+      else if (diff <= 20000) score += 4;
+      else score -= 15;
+    }
+
+    return score;
+  }
+
+  async resolveSingleSpotifyTrack(node, spotifyTrack, requestedBy) {
+    const queries = this.buildSpotifySearchQueries(spotifyTrack);
+    let bestRaw = null;
+    let bestScore = Number.NEGATIVE_INFINITY;
+
+    for (const query of queries) {
+      const result = await this.searchLavalink(node, query);
+      const candidates = result.tracks.slice(0, 5);
+      if (!candidates.length) continue;
+
+      for (const raw of candidates) {
+        const score = this.scoreSpotifyCandidate(raw, spotifyTrack);
+        if (score > bestScore) {
+          bestScore = score;
+          bestRaw = raw;
+        }
+      }
+
+      if (bestScore >= 85) break;
+    }
+
+    if (!bestRaw) return null;
+    return this.buildTrack(bestRaw, requestedBy, spotifyTrack);
+  }
+
   async resolvePlayableTracks(node, query, requestedBy) {
     if (SpotifyService.isSpotifyUrl(query)) {
       const resolved = await this.spotify.resolve(query);
       const mapped = [];
       const batchSize = 6;
+      const requestedCount = resolved.tracks.length;
 
       for (let i = 0; i < resolved.tracks.length; i += batchSize) {
         const chunk = resolved.tracks.slice(i, i + batchSize);
         const chunkResolved = await Promise.all(
           chunk.map(async (spotifyTrack) => {
-            const searchQuery = `ytmsearch:${spotifyTrack.title} ${spotifyTrack.author}`;
-            const result = await this.searchLavalink(node, searchQuery);
-            if (!result.tracks.length) return null;
-            return this.buildTrack(result.tracks[0], requestedBy, spotifyTrack);
+            return this.resolveSingleSpotifyTrack(node, spotifyTrack, requestedBy);
           })
         );
 
@@ -155,7 +257,9 @@ class MusicManager {
       return {
         tracks: mapped,
         playlistName: resolved.name,
-        sourceKind: resolved.kind
+        sourceKind: resolved.kind,
+        requestedCount,
+        skippedCount: Math.max(0, requestedCount - mapped.length)
       };
     }
 
@@ -171,7 +275,9 @@ class MusicManager {
     return {
       tracks,
       playlistName: result.playlistName,
-      sourceKind: result.playlistName ? 'playlist' : 'track'
+      sourceKind: result.playlistName ? 'playlist' : 'track',
+      requestedCount: tracks.length,
+      skippedCount: 0
     };
   }
 
@@ -428,6 +534,8 @@ class MusicManager {
       addedCount: toAdd.length,
       sourceKind: resolved.sourceKind,
       playlistName: resolved.playlistName,
+      requestedCount: resolved.requestedCount || toAdd.length,
+      skippedCount: Math.max(0, resolved.skippedCount || 0),
       firstTrack: toAdd[0] || null,
       willStartImmediately
     };
@@ -447,8 +555,13 @@ class MusicManager {
     }
 
     if (result.sourceKind === 'playlist' || result.addedCount > 1) {
+      const skippedSuffix = result.skippedCount > 0 ? `\nSaltati (non trovati): **${result.skippedCount}**` : '';
       await interaction.editReply({
-        embeds: [playlistLoadedEmbed(result.playlistName, result.addedCount)]
+        embeds: [
+          playlistLoadedEmbed(result.playlistName, result.addedCount).setDescription(
+            `Aggiunti **${result.addedCount}** brani${result.playlistName ? ` dalla playlist **${result.playlistName}**` : ''}.${skippedSuffix}`
+          )
+        ]
       });
     } else if (!result.willStartImmediately) {
       const single = result.firstTrack;
