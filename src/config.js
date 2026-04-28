@@ -46,6 +46,10 @@ const config = {
     port: parseIntOr(process.env.DASHBOARD_PORT, 3000),
     publicUrl: process.env.DASHBOARD_PUBLIC_URL || `http://${process.env.DASHBOARD_HOST || '127.0.0.1'}:${parseIntOr(process.env.DASHBOARD_PORT, 3000)}`
   },
+  notifications: {
+    guildJoinChannelId: process.env.GUILD_JOIN_LOG_CHANNEL_ID || '1235541924547661854',
+    guildLeaveChannelId: process.env.GUILD_LEAVE_LOG_CHANNEL_ID || '1235541940901249074'
+  },
   theme: {
     primary: 0x6d5cff,
     secondary: 0x27d3ff,
