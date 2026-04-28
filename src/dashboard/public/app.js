@@ -59,6 +59,9 @@ const effectsCloseBtn = document.getElementById('effectsCloseBtn');
 
 const loopModes = ['off', 'song', 'queue'];
 const LYRICS_SYNC_DELAY_MS = 0;
+const SERVER_PROGRESS_BACKWARD_TOLERANCE_MS = 350;
+const SERVER_PROGRESS_HARD_RESET_BACKWARD_MS = 3500;
+const SERVER_PROGRESS_MAX_SOFT_BACKSTEP_MS = 120;
 let sessionInfo = null;
 let state = null;
 let canControl = false;
@@ -155,7 +158,8 @@ const syncProgressAnchorFromServer = (s) => {
   }
 
   const duration = s.current.duration || 0;
-  const serverMs = Math.max(0, Number(s.progressMs || 0));
+  const serverMsRaw = Math.max(0, Number(s.progressMs || 0));
+  const serverMs = duration > 0 ? Math.min(serverMsRaw, duration) : serverMsRaw;
 
   if (progressTrackKey !== trackKey) {
     progressTrackKey = trackKey;
@@ -164,8 +168,31 @@ const syncProgressAnchorFromServer = (s) => {
     return;
   }
 
-  // Always resync to server sample to avoid long-term drift between tracks.
-  progressAnchorMs = duration > 0 ? Math.min(serverMs, duration) : serverMs;
+  if (s.paused) {
+    progressAnchorMs = serverMs;
+    progressAnchorTs = now;
+    return;
+  }
+
+  // Keep progress monotonic to avoid lyrics jumping backwards due jittery server samples.
+  const elapsed = Math.max(0, now - progressAnchorTs);
+  const liveBeforeSync = (duration > 0 ? Math.min(progressAnchorMs + elapsed, duration) : progressAnchorMs + elapsed);
+  const backwardDelta = liveBeforeSync - serverMs;
+
+  if (backwardDelta > SERVER_PROGRESS_HARD_RESET_BACKWARD_MS) {
+    // Real backward seek/restart: trust server hard reset.
+    progressAnchorMs = serverMs;
+    progressAnchorTs = now;
+    return;
+  }
+
+  if (backwardDelta > SERVER_PROGRESS_BACKWARD_TOLERANCE_MS) {
+    // Small backward jitter: ignore to keep lyrics smooth and monotonic.
+    return;
+  }
+
+  // Tiny backward adjustments are clamped to avoid visible line "bounce".
+  progressAnchorMs = Math.max(serverMs, liveBeforeSync - SERVER_PROGRESS_MAX_SOFT_BACKSTEP_MS);
   progressAnchorTs = now;
 };
 
@@ -600,7 +627,7 @@ const bootstrap = async () => {
     if (!state?.current || state.paused) return;
     renderProgressOnly();
     updateLyricsProgress();
-  }, 1000);
+  }, 250);
 };
 
 searchBtn.addEventListener('click', () => search());
