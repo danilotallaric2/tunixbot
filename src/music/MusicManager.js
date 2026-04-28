@@ -293,6 +293,7 @@ class MusicManager {
     }
 
     queue.current = next;
+    queue.currentSessionId += 1;
 
     try {
       await queue.player.playTrack({

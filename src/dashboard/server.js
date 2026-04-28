@@ -51,6 +51,7 @@ const buildStateFromQueue = (client, queue) => {
     textChannelId: queue.textChannelId,
     current: queue.current
       ? {
+          sessionId: queue.currentSessionId || 0,
           title: queue.current.title,
           author: queue.current.author,
           duration: queue.current.duration,
@@ -448,6 +449,7 @@ const createDashboardServer = (client) => {
       res.json({
         ok: true,
         track: {
+          sessionId: queue.currentSessionId || 0,
           title: queue.current.title,
           author: queue.current.author,
           duration: queue.current.duration

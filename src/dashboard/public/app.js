@@ -71,6 +71,7 @@ let lyricsOpen = false;
 let lyricsLines = [];
 let lyricsTrackKey = null;
 let activeLyricIndex = -1;
+let lyricsRequestSeq = 0;
 
 const seededChips = ['italian rap', 'trap italia', 'pop hits', 'chill vibes', 'night drive', 'deep house', 'anime opening'];
 
@@ -139,7 +140,7 @@ const ensureCanControl = () => {
 
 const getTrackKey = (s) => {
   if (!s?.current) return null;
-  return `${s.current.title}|${s.current.author}|${s.current.duration}|${s.current.url || ''}`;
+  return `${s.current.sessionId || 0}|${s.current.title}|${s.current.author}|${s.current.duration}|${s.current.url || ''}`;
 };
 
 const syncProgressAnchorFromServer = (s) => {
@@ -280,20 +281,26 @@ const loadLyricsForCurrentTrack = async () => {
   if (!state?.current) {
     lyricsLines = [];
     activeLyricIndex = -1;
+    lyricsTrackKey = null;
     renderLyricsLines();
     return;
   }
 
-  const trackKey = getTrackKey(state);
-  if (lyricsTrackKey === trackKey && lyricsLines.length) return;
+  const requestTrackKey = getTrackKey(state);
+  if (lyricsTrackKey === requestTrackKey && lyricsLines.length) return;
 
-  lyricsTrackKey = trackKey;
+  const requestSeq = ++lyricsRequestSeq;
   activeLyricIndex = -1;
+  lyricsLines = [];
   lyricsLinesWrap.innerHTML = '<div class=\"lyric-line\">Caricamento lyrics...</div>';
   lyricsTrackLabel.textContent = `${state.current.title} • ${state.current.author}`;
 
   const payload = await api('/api/lyrics');
+  if (requestSeq !== lyricsRequestSeq) return;
+  if (!state?.current || getTrackKey(state) !== requestTrackKey) return;
+
   lyricsLines = parseSyncedLyrics(payload.syncedLyrics || '');
+  lyricsTrackKey = requestTrackKey;
   renderLyricsLines();
   updateLyricsProgress();
 };
@@ -435,6 +442,7 @@ const renderNowPlaying = (s) => {
   if (newTrackKey !== oldTrackKey) {
     lyricsTrackKey = null;
     activeLyricIndex = -1;
+    lyricsRequestSeq += 1;
     if (lyricsOpen) {
       loadLyricsForCurrentTrack().catch(() => {
         lyricsLines = [];

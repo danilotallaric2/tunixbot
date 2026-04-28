@@ -16,6 +16,7 @@ class GuildQueue {
     this.nowPlayingMessageId = null;
     this.startedAt = 0;
     this.positionOffsetMs = 0;
+    this.currentSessionId = 0;
     this.nowPlayingUpdateTimer = null;
     this.joinedByUserId = null;
     this.joinedAt = 0;
