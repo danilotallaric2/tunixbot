@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TunixBot Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Sora:wght@600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div id="authGate" class="auth-gate">
+      <div class="auth-card">
+        <h1>TunixBot Dashboard</h1>
+        <p>Accedi con Discord per gestire il player.</p>
+        <a class="discord-login" href="/auth/discord/login">Login con Discord</a>
+      </div>
+    </div>
+
+    <div id="appRoot" class="app hidden">
+      <div id="joinPopup" class="join-popup hidden" role="status" aria-live="polite">
+        <div class="join-popup-card">
+          <div class="join-popup-title">Sessione non trovata</div>
+          <div class="join-popup-text">
+            Entra in vocale su Discord e usa <b>/join</b>. La dashboard si aggiornera automaticamente.
+          </div>
+        </div>
+      </div>
+
+      <header class="top-nav glass">
+        <div class="brand">
+          <img class="brand-logo" src="/assets/logo.png" alt="TunixBot logo" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';" />
+          <div class="brand-logo-fallback" style="display:none;">T</div>
+          <div>
+            <div class="brand-title">TunixBot</div>
+            <div class="brand-sub">Music Dashboard</div>
+          </div>
+        </div>
+
+        <div class="search-area">
+          <input id="searchInput" type="text" placeholder="Cosa vuoi ascoltare?" />
+          <select id="searchSourceSelect" class="search-source">
+            <option value="spotify" selected>Spotify</option>
+            <option value="youtube">YouTube</option>
+          </select>
+          <button id="searchBtn" class="btn secondary">Cerca</button>
+          <button id="playBtn" class="btn primary">Play Query</button>
+        </div>
+
+        <div class="userbox">
+          <img id="userAvatar" alt="avatar" />
+          <div>
+            <div id="userName" class="user-name"></div>
+            <button id="logoutBtn" class="logout-btn">Logout</button>
+          </div>
+        </div>
+      </header>
+
+      <div id="lyricsPanel" class="lyrics-panel hidden">
+        <div class="lyrics-card glass">
+          <div class="lyrics-head">
+            <div>
+              <div class="lyrics-title">Lyrics Live</div>
+              <div id="lyricsTrackLabel" class="lyrics-track-label">-</div>
+            </div>
+            <button id="lyricsCloseBtn" class="ctl">Chiudi</button>
+          </div>
+          <div class="lyrics-layout">
+            <div id="lyricsBody" class="lyrics-body">
+              <div id="lyricsLines" class="lyrics-lines"></div>
+            </div>
+            <aside class="lyrics-player glass">
+              <img id="lyricsNpThumb" class="lyrics-np-thumb" alt="cover" />
+              <div id="lyricsNpTitle" class="np-title">Nessun brano</div>
+              <div id="lyricsNpArtist" class="np-artist">-</div>
+              <div class="effect-label">Effetto: <b id="lyricsCurrentEffect">clear</b></div>
+              <div class="meta-row">
+                <span>Progress</span>
+                <span id="lyricsProgressText">0:00 / 0:00</span>
+              </div>
+              <input id="lyricsSeekRange" type="range" min="0" max="100" value="0" />
+              <div class="spotify-controls">
+                <button id="lyricsShuffleBtn" class="icon-btn text-btn" title="Mischia Coda">Shuffle</button>
+                <button id="lyricsSkipBtn" class="icon-btn text-btn" title="Prossimo Brano">Skip</button>
+                <button id="lyricsPlayPauseBtn" class="icon-btn play-main" title="Play/Pausa">▶</button>
+                <button id="lyricsStopBtn" class="icon-btn danger text-btn" title="Ferma">Stop</button>
+                <button id="lyricsLoopBtn" class="icon-btn text-btn" title="Loop">Loop</button>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </div>
+
+      <div id="effectsPanel" class="lyrics-panel hidden">
+        <div class="lyrics-card glass">
+          <div class="lyrics-head">
+            <div>
+              <div class="lyrics-title">Effetti Audio</div>
+              <div class="lyrics-track-label">Scegli un filtro da applicare al player corrente</div>
+            </div>
+            <button id="effectsCloseBtn" class="ctl">Chiudi</button>
+          </div>
+          <div class="effects-grid">
+            <button class="ctl" data-effect="bassboost">Bassboost</button>
+            <button class="ctl" data-effect="nightcore">Nightcore</button>
+            <button class="ctl" data-effect="vaporwave">Vaporwave</button>
+            <button class="ctl" data-effect="8d">8D</button>
+            <button class="ctl danger" data-effect="clear">Clear</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="layout">
+        <aside class="left glass">
+          <h3>La tua sessione</h3>
+          <div class="join-note">Fai prima <b>/join</b> su Discord nel canale vocale.</div>
+          <div class="session-box">
+            <div class="session-row"><span>Server</span><b id="sessionGuild">-</b></div>
+            <div class="session-row"><span>Vocale Bot</span><b id="sessionVoice">-</b></div>
+            <div class="session-row"><span>Canale Testo</span><b id="sessionText">-</b></div>
+          </div>
+          <div id="statusPill" class="status-pill">Pronto</div>
+
+          <h3>Scopri</h3>
+          <div id="chips" class="chips"></div>
+
+          <h3>Coda</h3>
+          <div id="queueList" class="queue-list"></div>
+        </aside>
+
+        <main class="center glass">
+          <section id="discoverSection">
+            <div class="section-head">
+              <h2>Brani consigliati</h2>
+            </div>
+            <div id="discoverWrap" class="discover-wrap"></div>
+          </section>
+
+          <section id="resultsSection" class="hidden">
+            <div class="section-head">
+              <h2>Risultati ricerca</h2>
+              <span id="resultsCount">0</span>
+            </div>
+            <div id="results" class="results-grid"></div>
+          </section>
+        </main>
+
+        <aside class="right glass">
+          <h3>Ora in riproduzione</h3>
+          <img id="npThumb" class="np-thumb" alt="cover" />
+          <div id="npTitle" class="np-title">Nessun brano</div>
+          <div id="npArtist" class="np-artist">-</div>
+
+          <div class="meta-row">
+            <span>Progress</span>
+            <span id="progressText">0:00 / 0:00</span>
+          </div>
+          <input id="seekRange" type="range" min="0" max="100" value="0" />
+
+          <div class="meta-row">
+            <span>Volume</span>
+            <span id="volumeText">80%</span>
+          </div>
+          <input id="volumeRange" type="range" min="0" max="200" value="80" />
+          <div class="effect-label">Effetto: <b id="currentEffect">clear</b></div>
+
+          <div class="spotify-controls">
+            <button data-action="shuffle" class="icon-btn text-btn" title="Mischia Coda">Shuffle</button>
+            <button data-action="skip" class="icon-btn text-btn" title="Prossimo Brano">Skip</button>
+            <button id="playPauseBtn" class="icon-btn play-main" title="Play/Pausa">▶</button>
+            <button data-action="stop" class="icon-btn danger text-btn" title="Ferma">Stop</button>
+            <button id="loopBtn" class="icon-btn text-btn" title="Loop">Loop</button>
+          </div>
+          <div class="quick-actions">
+            <button id="lyricsBtn" class="ctl">Lyrics</button>
+            <button id="effectsBtn" class="ctl">Effetti</button>
+            <button id="refreshBtn" class="ctl">Refresh</button>
+          </div>
+        </aside>
+      </div>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
