@@ -1,4 +1,5 @@
 const { Shoukaku, Connectors } = require('shoukaku');
+const { inspect } = require('util');
 const config = require('../config');
 const logger = require('../utils/logger');
 const GuildQueue = require('./GuildQueue');
@@ -136,6 +137,28 @@ class MusicManager {
     const result = await node.rest.resolve(query);
     const normalized = this.normalizeLoadResult(result);
     return normalized;
+  }
+
+  logTrackFailureContext(queue, type, event = null, track = null) {
+    const t = track || queue?.current || null;
+    const payload = {
+      type,
+      guildId: queue?.guildId || null,
+      voiceChannelId: queue?.voiceChannelId || null,
+      textChannelId: queue?.textChannelId || null,
+      currentTrack: t
+        ? {
+            title: t.title,
+            author: t.author,
+            url: t.url,
+            duration: t.duration,
+            recoveryAttempts: t.recoveryAttempts || 0
+          }
+        : null,
+      event: event || null
+    };
+
+    logger.error(`Track failure context: ${type}`, inspect(payload, { depth: 5, colors: false }));
   }
 
   normalizeCompareText(value) {
@@ -505,14 +528,16 @@ class MusicManager {
     queue.player.on('exception', async (event) => {
       queue.clearTrackStartTimeout();
       logger.error(`Track exception in guild ${queue.guildId}: ${event?.exception?.message || 'Unknown error'}`);
+      this.logTrackFailureContext(queue, 'exception', event, queue.current);
       await this.safeTextSend(queue.textChannelId, {
         embeds: [errorEmbed('Errore Traccia', 'Il brano corrente ha generato un errore. Passo al prossimo...')]
       });
       await this.onTrackEnd(queue, 'loadFailed');
     });
 
-    queue.player.on('stuck', async () => {
+    queue.player.on('stuck', async (event) => {
       queue.clearTrackStartTimeout();
+      this.logTrackFailureContext(queue, 'stuck', event, queue.current);
       await this.safeTextSend(queue.textChannelId, {
         embeds: [errorEmbed('Traccia Bloccata', 'La traccia si e bloccata. Passo al prossimo brano...')]
       });
@@ -550,9 +575,14 @@ class MusicManager {
     const finishedTrack = queue.current;
     const playedMs = this.getPlayerPosition(queue);
 
+    if (reason !== 'finished') {
+      this.logTrackFailureContext(queue, `track_end:${reason}`, { reason, playedMs }, finishedTrack);
+    }
+
     if (reason === 'loadFailed' && finishedTrack) {
       const recovered = await this.tryRecoverFailedTrack(queue, finishedTrack);
       if (recovered) return;
+      logger.warn(`Track recovery failed for guild ${queue.guildId}: ${finishedTrack.title} - ${finishedTrack.author}`);
     }
 
     const suspiciousInstantFinish =
