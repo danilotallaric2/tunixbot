@@ -1,10 +1,12 @@
 const path = require('path');
+const fs = require('fs');
 const crypto = require('crypto');
 const express = require('express');
 const session = require('express-session');
 const config = require('../config');
 const logger = require('../utils/logger');
 const { formatDuration } = require('../utils/time');
+const JsonSessionStore = require('./jsonSessionStore');
 const SpotifyUserStore = require('./spotifyUserStore');
 
 const DISCORD_API = 'https://discord.com/api/v10';
@@ -23,7 +25,26 @@ const parseSearchSource = (value) => {
   return 'spotify';
 };
 
-const sessionSecret = process.env.DASHBOARD_SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+const SESSION_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 30;
+
+const getSessionSecret = () => {
+  if (process.env.DASHBOARD_SESSION_SECRET) return process.env.DASHBOARD_SESSION_SECRET;
+
+  const secretPath = path.join(__dirname, '..', 'data', 'dashboard-session-secret.txt');
+  const dir = path.dirname(secretPath);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+  if (fs.existsSync(secretPath)) {
+    const existing = fs.readFileSync(secretPath, 'utf8').trim();
+    if (existing.length >= 32) return existing;
+  }
+
+  const generated = crypto.randomBytes(32).toString('hex');
+  fs.writeFileSync(secretPath, generated, 'utf8');
+  return generated;
+};
+
+const sessionSecret = getSessionSecret();
 
 const buildUserAvatar = (user) => {
   if (!user?.avatar) return null;
@@ -85,18 +106,23 @@ const buildStateFromQueue = (client, queue) => {
 const createDashboardServer = (client) => {
   const app = express();
   const spotifyStore = new SpotifyUserStore(path.join(__dirname, '..', 'data', 'spotify-users.json'));
+  const dashboardSessionStore = new JsonSessionStore(path.join(__dirname, '..', 'data', 'dashboard-sessions.json'), {
+    ttlMs: SESSION_MAX_AGE_MS
+  });
   const spotifyEnabled = Boolean(config.spotify.clientId && config.spotify.clientSecret && config.spotify.redirectUri);
   app.use(express.json({ limit: '1mb' }));
   app.use(
     session({
+      store: dashboardSessionStore,
       secret: sessionSecret,
       resave: false,
       saveUninitialized: false,
+      rolling: true,
       cookie: {
         httpOnly: true,
         sameSite: 'lax',
         secure: false,
-        maxAge: 1000 * 60 * 60 * 24 * 7
+        maxAge: SESSION_MAX_AGE_MS
       }
     })
   );

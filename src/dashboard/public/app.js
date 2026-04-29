@@ -1,6 +1,7 @@
 const authGate = document.getElementById('authGate');
 const appRoot = document.getElementById('appRoot');
 const joinPopup = document.getElementById('joinPopup');
+const toastViewport = document.getElementById('toastViewport');
 const versionPopup = document.getElementById('versionPopup');
 const versionPopupCloseBtn = document.getElementById('versionPopupCloseBtn');
 const versionConfetti = document.getElementById('versionConfetti');
@@ -177,7 +178,7 @@ const dismissVersionPopup = () => {
   versionPopup.classList.add('hidden');
 };
 
-const setStatus = (text, isError = false) => {
+const setConnectionStatus = (text, isError = false) => {
   if (!statusPill) return;
   const message = String(text || '');
 
@@ -197,6 +198,35 @@ const setStatus = (text, isError = false) => {
   } else {
     statusPill.classList.add('status-info');
   }
+};
+
+const showToast = (text, type = 'info') => {
+  if (!toastViewport) return;
+  const message = String(text || '').trim();
+  if (!message) return;
+
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+  toast.innerHTML = `
+    <div class="toast-mark" aria-hidden="true"></div>
+    <div class="toast-message"></div>
+    <button class="toast-close" type="button" aria-label="Chiudi notifica">x</button>
+  `;
+
+  toast.querySelector('.toast-message').textContent = message;
+  toastViewport.appendChild(toast);
+
+  const close = () => {
+    toast.classList.add('closing');
+    setTimeout(() => toast.remove(), 180);
+  };
+
+  toast.querySelector('.toast-close')?.addEventListener('click', close);
+  setTimeout(close, type === 'error' ? 5200 : 3400);
+};
+
+const setStatus = (text, isError = false) => {
+  showToast(text, isError ? 'error' : 'info');
 };
 
 const setPlayPauseVisual = (button, paused = true) => {
@@ -750,11 +780,11 @@ const refreshSession = async () => {
 
   if (!payload.session) {
     showJoinPopup();
-    setStatus(payload.message || 'Usa /join su Discord per iniziare.', true);
+    setConnectionStatus('Sessione non trovata', true);
   } else {
     hideJoinPopup();
-    if (!payload.canControl) setStatus(payload.message || 'Entra nella stessa vocale del bot.', true);
-    else setStatus('Connesso e pronto');
+    if (!payload.canControl) setConnectionStatus('Entra nella stessa vocale', true);
+    else setConnectionStatus('Connesso e pronto');
   }
 };
 
