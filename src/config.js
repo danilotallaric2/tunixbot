@@ -40,11 +40,7 @@ const config = {
   spotify: {
     clientId: process.env.SPOTIFY_CLIENT_ID,
     clientSecret: process.env.SPOTIFY_CLIENT_SECRET,
-    market: process.env.SPOTIFY_MARKET || 'US',
-    redirectUri: process.env.SPOTIFY_REDIRECT_URI || buildDefaultOAuthRedirect('/auth/spotify/callback'),
-    scopes: (process.env.SPOTIFY_SCOPES || 'user-read-private user-read-email playlist-read-private playlist-read-collaborative user-library-read')
-      .split(/\s+/)
-      .filter(Boolean)
+    market: process.env.SPOTIFY_MARKET || 'US'
   },
   music: {
     defaultVolume: parseIntOr(process.env.DEFAULT_VOLUME, 80),

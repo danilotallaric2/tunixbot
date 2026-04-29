@@ -29,12 +29,6 @@ const resultsCount = document.getElementById('resultsCount');
 const queueList = document.getElementById('queueList');
 const clearQueueBtn = document.getElementById('clearQueueBtn');
 const statusPill = document.getElementById('statusPill');
-const spotifyConnectBtn = document.getElementById('spotifyConnectBtn');
-const spotifyDisconnectBtn = document.getElementById('spotifyDisconnectBtn');
-const spotifyUserLabel = document.getElementById('spotifyUserLabel');
-const spotifyLibraryList = document.getElementById('spotifyLibraryList');
-const spotifyTabPlaylists = document.getElementById('spotifyTabPlaylists');
-const spotifyTabLiked = document.getElementById('spotifyTabLiked');
 
 const npThumb = document.getElementById('npThumb');
 const npTitle = document.getElementById('npTitle');
@@ -91,8 +85,6 @@ let lyricsLines = [];
 let lyricsTrackKey = null;
 let activeLyricIndex = -1;
 let lyricsRequestSeq = 0;
-let spotifyConnected = false;
-let spotifyLibraryType = 'playlists';
 
 const seededChips = ['italian rap', 'trap italia', 'pop hits', 'chill vibes', 'night drive', 'deep house', 'anime opening'];
 
@@ -264,37 +256,6 @@ const updateEffectSelection = (filter = 'clear') => {
     button.classList.toggle('active', active);
     button.setAttribute('aria-pressed', active ? 'true' : 'false');
   }
-};
-
-const setSpotifyTab = (type) => {
-  spotifyLibraryType = type;
-  spotifyTabPlaylists?.classList.toggle('main', type === 'playlists');
-  spotifyTabLiked?.classList.toggle('main', type === 'liked');
-};
-
-const renderSpotifyLikedBulkView = () => {
-  spotifyLibraryList.innerHTML = `
-    <div class="spotify-liked-bulk">
-      <div class="spotify-lib-title">Brani preferiti Spotify</div>
-      <div class="spotify-lib-sub">Metto direttamente tutti i preferiti in coda (senza lista).</div>
-      <button id="spotifyEnqueueLikedBtn" class="ctl main">Aggiungi tutti in coda</button>
-    </div>
-  `;
-
-  const btn = document.getElementById('spotifyEnqueueLikedBtn');
-  btn?.addEventListener('click', async () => {
-    try {
-      ensureCanControl();
-      setStatus('Carico preferiti Spotify in coda...');
-      const payload = await api('/api/spotify/liked/enqueue', { method: 'POST' });
-      await refreshSession();
-      const added = Number(payload?.addedCount || 0);
-      const skipped = Number(payload?.skippedCount || 0);
-      setStatus(`Preferiti aggiunti: ${added}${skipped > 0 ? `, saltati: ${skipped}` : ''}`);
-    } catch (error) {
-      setStatus(error.message, true);
-    }
-  });
 };
 
 const formatDuration = (ms) => {
@@ -540,87 +501,6 @@ const renderSessionInfo = (session) => {
   sessionGuild.textContent = session?.guildName || '-';
   sessionVoice.textContent = session?.voiceChannelName || '-';
   sessionText.textContent = session?.textChannelName ? `#${session.textChannelName}` : '-';
-};
-
-const renderSpotifyLibrary = (items, type) => {
-  spotifyLibraryList.innerHTML = '';
-  if (!spotifyConnected) {
-    spotifyLibraryList.innerHTML = '<div class="queue-author">Collega Spotify per vedere la tua libreria.</div>';
-    return;
-  }
-
-  if (!items.length) {
-    spotifyLibraryList.innerHTML = `<div class="queue-author">Nessun elemento in ${type === 'liked' ? 'brani preferiti' : 'playlist'}.</div>`;
-    return;
-  }
-
-  for (const item of items) {
-    const card = document.createElement('div');
-    card.className = 'spotify-lib-item';
-    card.innerHTML = `
-      <img src="${item.image || ''}" alt="cover" />
-      <div>
-        <div class="spotify-lib-title">${item.name}</div>
-        <div class="spotify-lib-sub">${type === 'liked' ? `${item.artists || '-'}${item.album ? ` • ${item.album}` : ''}` : `${item.owner || '-'} • ${item.tracksCount || 0} brani`}</div>
-        <div class="spotify-lib-actions">
-          <button class="queue-action-btn" data-spotify-play="${item.url || ''}">Play</button>
-        </div>
-      </div>
-    `;
-    spotifyLibraryList.appendChild(card);
-  }
-};
-
-const loadSpotifyStatus = async () => {
-  try {
-    const data = await api('/api/spotify/status');
-    spotifyConnected = Boolean(data.connected);
-    if (!spotifyConnected) {
-      spotifyUserLabel.textContent = data.error || 'Non collegato';
-      spotifyConnectBtn?.classList.remove('hidden');
-      if (spotifyConnectBtn) spotifyConnectBtn.textContent = 'Collega';
-      spotifyDisconnectBtn?.classList.add('hidden');
-      renderSpotifyLibrary([], spotifyLibraryType);
-      return;
-    }
-
-    spotifyConnectBtn?.classList.remove('hidden');
-    if (spotifyConnectBtn) spotifyConnectBtn.textContent = 'Ricollega';
-    spotifyDisconnectBtn?.classList.remove('hidden');
-    const profileName = data.profile?.displayName || data.profile?.spotifyUserId || null;
-    spotifyUserLabel.textContent = profileName
-      ? `Connesso: ${profileName}`
-      : 'Connesso: profilo Spotify da ricollegare';
-    await loadSpotifyLibrary(spotifyLibraryType);
-  } catch (error) {
-    spotifyConnected = false;
-    spotifyUserLabel.textContent = 'Errore collegamento Spotify';
-    spotifyConnectBtn?.classList.remove('hidden');
-    if (spotifyConnectBtn) spotifyConnectBtn.textContent = 'Ricollega';
-    spotifyDisconnectBtn?.classList.add('hidden');
-    renderSpotifyLibrary([], spotifyLibraryType);
-  }
-};
-
-const loadSpotifyLibrary = async (type = spotifyLibraryType) => {
-  setSpotifyTab(type);
-  if (!spotifyConnected) {
-    renderSpotifyLibrary([], type);
-    return;
-  }
-
-  if (type === 'liked') {
-    renderSpotifyLikedBulkView();
-    return;
-  }
-
-  try {
-    spotifyLibraryList.innerHTML = '<div class="queue-author">Caricamento libreria Spotify...</div>';
-    const payload = await api(`/api/spotify/library?type=${encodeURIComponent(type)}&limit=20&offset=0`);
-    renderSpotifyLibrary(payload.items || [], type);
-  } catch (error) {
-    spotifyLibraryList.innerHTML = `<div class="queue-author">${error.message}</div>`;
-  }
 };
 
 const renderQueue = (queue) => {
@@ -882,7 +762,6 @@ const bootstrap = async () => {
   }
 
   await refreshSession();
-  await loadSpotifyStatus();
   await loadDiscover();
   setViewMode('discover');
   updateSourceBadge();
@@ -1044,37 +923,6 @@ clearQueueBtn?.addEventListener('click', async () => {
 versionPopupCloseBtn?.addEventListener('click', dismissVersionPopup);
 versionPopup?.addEventListener('click', (event) => {
   if (event.target === versionPopup) dismissVersionPopup();
-});
-
-spotifyConnectBtn?.addEventListener('click', () => {
-  window.location.href = '/auth/spotify/login';
-});
-
-spotifyDisconnectBtn?.addEventListener('click', async () => {
-  try {
-    await api('/auth/spotify/logout', { method: 'POST' });
-    spotifyConnected = false;
-    setStatus('Spotify disconnesso');
-    await loadSpotifyStatus();
-  } catch (error) {
-    setStatus(error.message, true);
-  }
-});
-
-spotifyTabPlaylists?.addEventListener('click', () => {
-  loadSpotifyLibrary('playlists');
-});
-
-spotifyTabLiked?.addEventListener('click', () => {
-  loadSpotifyLibrary('liked');
-});
-
-spotifyLibraryList?.addEventListener('click', async (event) => {
-  const target = event.target;
-  if (!(target instanceof HTMLElement)) return;
-  const link = target.dataset.spotifyPlay;
-  if (!link) return;
-  await enqueue(link);
 });
 
 seekRange.addEventListener('change', () => {

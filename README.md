@@ -3,6 +3,7 @@
 TunixBot e un bot Discord musicale moderno e professionale, pensato per riprodurre musica nei canali vocali da query/link YouTube e da link Spotify (track, playlist, album) usando API ufficiali Spotify.
 
 Include anche una dashboard web in stile Spotify per ricerca tracce, gestione coda e controllo player live.
+La dashboard non usa login Spotify personale: playlist e preferiti account utente non sono gestiti.
 
 ## Stack
 
