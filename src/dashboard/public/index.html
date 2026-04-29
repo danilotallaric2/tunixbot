@@ -6,7 +6,10 @@
     <title>TunixBot Dashboard</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Sora:wght@600;700&display=swap" rel="stylesheet" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -19,14 +22,18 @@
     </div>
 
     <div id="appRoot" class="app hidden">
-      <div id="versionPopup" class="version-popup-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="versionPopupTitle">
-        <div class="version-popup-card glass">
+      <div
+        id="versionPopup"
+        class="version-popup-overlay hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="versionPopupTitle"
+      >
+        <div class="version-popup-card">
           <div id="versionConfetti" class="version-confetti" aria-hidden="true"></div>
           <div class="version-badge">Nuova versione</div>
           <h2 id="versionPopupTitle">TunixBot 1.0.5</h2>
-          <div class="version-popup-text">
-            Abbiamo aggiornato:
-          </div>
+          <div class="version-popup-text">Abbiamo aggiornato:</div>
           <ul class="version-list">
             <li>Spotify OAuth multi-utente in dashboard</li>
             <li>Libreria Spotify in dashboard (playlist + preferiti)</li>
@@ -48,37 +55,8 @@
         </div>
       </div>
 
-      <header class="top-nav glass">
-        <div class="brand">
-          <img class="brand-logo" src="/assets/logo.png" alt="TunixBot logo" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';" />
-          <div class="brand-logo-fallback" style="display:none;">T</div>
-          <div>
-            <div class="brand-title">TunixBot</div>
-            <div class="brand-sub">Music Dashboard</div>
-          </div>
-        </div>
-
-        <div class="search-area">
-          <input id="searchInput" type="text" placeholder="Cosa vuoi ascoltare?" />
-          <select id="searchSourceSelect" class="search-source">
-            <option value="spotify" selected>Spotify</option>
-            <option value="youtube">YouTube</option>
-          </select>
-          <button id="searchBtn" class="btn secondary">Cerca</button>
-          <button id="playBtn" class="btn primary">Play Query</button>
-        </div>
-
-        <div class="userbox">
-          <img id="userAvatar" alt="avatar" />
-          <div>
-            <div id="userName" class="user-name"></div>
-            <button id="logoutBtn" class="logout-btn">Logout</button>
-          </div>
-        </div>
-      </header>
-
       <div id="lyricsPanel" class="lyrics-panel hidden">
-        <div class="lyrics-card glass">
+        <div class="lyrics-card">
           <div class="lyrics-head">
             <div>
               <div class="lyrics-title">Lyrics Live</div>
@@ -90,7 +68,7 @@
             <div id="lyricsBody" class="lyrics-body">
               <div id="lyricsLines" class="lyrics-lines"></div>
             </div>
-            <aside class="lyrics-player glass">
+            <aside class="lyrics-player">
               <img id="lyricsNpThumb" class="lyrics-np-thumb" alt="cover" />
               <div id="lyricsNpTitle" class="np-title">Nessun brano</div>
               <div id="lyricsNpArtist" class="np-artist">-</div>
@@ -113,7 +91,7 @@
       </div>
 
       <div id="effectsPanel" class="lyrics-panel hidden">
-        <div class="lyrics-card glass">
+        <div class="lyrics-card compact">
           <div class="lyrics-head">
             <div>
               <div class="lyrics-title">Effetti Audio</div>
@@ -131,10 +109,31 @@
         </div>
       </div>
 
-      <div class="layout">
-        <aside class="left glass">
-          <h3>La tua sessione</h3>
-          <div class="join-note">Fai prima <b>/join</b> su Discord nel canale vocale.</div>
+      <div class="spotify-shell">
+        <aside class="left-col panel">
+          <div class="brand-block">
+            <img
+              class="brand-logo"
+              src="/assets/logo.png"
+              alt="TunixBot logo"
+              onerror="this.style.display='none'; this.nextElementSibling.style.display='grid';"
+            />
+            <div class="brand-logo-fallback" style="display: none">T</div>
+            <div>
+              <div class="brand-title">TunixBot</div>
+              <div class="brand-sub">Music Dashboard</div>
+            </div>
+          </div>
+
+          <div class="userbox">
+            <img id="userAvatar" alt="avatar" />
+            <div>
+              <div id="userName" class="user-name"></div>
+              <button id="logoutBtn" class="logout-btn">Logout</button>
+            </div>
+          </div>
+
+          <div class="section-title">Sessione</div>
           <div class="session-box">
             <div class="session-row"><span>Server</span><b id="sessionGuild">-</b></div>
             <div class="session-row"><span>Vocale Bot</span><b id="sessionVoice">-</b></div>
@@ -142,7 +141,8 @@
           </div>
           <div id="statusPill" class="status-pill">Pronto</div>
 
-          <div class="spotify-user-panel glass">
+          <div class="section-title">La tua libreria</div>
+          <div class="spotify-user-panel">
             <div class="spotify-user-head">
               <h3>Spotify</h3>
               <button id="spotifyConnectBtn" class="ctl main">Collega</button>
@@ -157,26 +157,35 @@
               <div class="queue-author">Collega Spotify per vedere la tua libreria.</div>
             </div>
           </div>
-
-          <h3>Scopri</h3>
-          <div id="chips" class="chips"></div>
-
-          <div class="queue-head">
-            <h3>Coda</h3>
-            <button id="clearQueueBtn" class="ctl danger">Svuota</button>
-          </div>
-          <div id="queueList" class="queue-list"></div>
         </aside>
 
-        <main class="center glass">
-          <section id="discoverSection">
+        <main class="center-col panel">
+          <header class="top-nav">
+            <div class="home-dot" aria-hidden="true">⌂</div>
+            <div class="search-area">
+              <input id="searchInput" type="text" placeholder="Cosa vuoi ascoltare?" />
+              <select id="searchSourceSelect" class="search-source">
+                <option value="spotify" selected>Spotify</option>
+                <option value="youtube">YouTube</option>
+              </select>
+              <button id="searchBtn" class="btn secondary">Cerca</button>
+              <button id="playBtn" class="btn primary">Play Query</button>
+            </div>
+          </header>
+
+          <section class="discover-chips">
+            <div class="section-title">Scopri</div>
+            <div id="chips" class="chips"></div>
+          </section>
+
+          <section id="discoverSection" class="content-section">
             <div class="section-head">
               <h2>Brani consigliati</h2>
             </div>
             <div id="discoverWrap" class="discover-wrap"></div>
           </section>
 
-          <section id="resultsSection" class="hidden">
+          <section id="resultsSection" class="content-section hidden">
             <div class="section-head">
               <h2>Risultati ricerca</h2>
               <span id="resultsCount">0</span>
@@ -185,25 +194,26 @@
           </section>
         </main>
 
-        <aside class="right glass">
-          <h3>Ora in riproduzione</h3>
+        <aside class="right-col panel">
+          <div class="queue-head">
+            <h3>Coda</h3>
+            <button id="clearQueueBtn" class="ctl danger">Svuota</button>
+          </div>
+          <div id="queueList" class="queue-list"></div>
+        </aside>
+      </div>
+
+      <footer class="player-footer">
+        <div class="player-left">
           <img id="npThumb" class="np-thumb" alt="cover" />
-          <div id="npTitle" class="np-title">Nessun brano</div>
-          <div id="npArtist" class="np-artist">-</div>
-
-          <div class="meta-row">
-            <span>Progress</span>
-            <span id="progressText">0:00 / 0:00</span>
+          <div>
+            <div id="npTitle" class="np-title">Nessun brano</div>
+            <div id="npArtist" class="np-artist">-</div>
+            <div class="effect-label">Effetto: <b id="currentEffect">clear</b></div>
           </div>
-          <input id="seekRange" type="range" min="0" max="100" value="0" />
+        </div>
 
-          <div class="meta-row">
-            <span>Volume</span>
-            <span id="volumeText">80%</span>
-          </div>
-          <input id="volumeRange" type="range" min="0" max="200" value="80" />
-          <div class="effect-label">Effetto: <b id="currentEffect">clear</b></div>
-
+        <div class="player-center">
           <div class="spotify-controls">
             <button data-action="shuffle" class="icon-btn text-btn" title="Mischia Coda">Shuffle</button>
             <button data-action="skip" class="icon-btn text-btn" title="Prossimo Brano">Skip</button>
@@ -211,13 +221,25 @@
             <button data-action="stop" class="icon-btn danger text-btn" title="Ferma">Stop</button>
             <button id="loopBtn" class="icon-btn text-btn" title="Loop">Loop</button>
           </div>
+
+          <div class="seek-row">
+            <span id="progressText">0:00 / 0:00</span>
+            <input id="seekRange" type="range" min="0" max="100" value="0" />
+          </div>
+        </div>
+
+        <div class="player-right">
+          <div class="volume-row">
+            <span id="volumeText">80%</span>
+            <input id="volumeRange" type="range" min="0" max="200" value="80" />
+          </div>
           <div class="quick-actions">
             <button id="lyricsBtn" class="ctl">Lyrics</button>
             <button id="effectsBtn" class="ctl">Effetti</button>
             <button id="refreshBtn" class="ctl">Refresh</button>
           </div>
-        </aside>
-      </div>
+        </div>
+      </footer>
     </div>
 
     <script src="/app.js"></script>
