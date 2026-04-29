@@ -578,20 +578,25 @@ const loadSpotifyStatus = async () => {
     if (!spotifyConnected) {
       spotifyUserLabel.textContent = 'Non collegato';
       spotifyConnectBtn?.classList.remove('hidden');
+      if (spotifyConnectBtn) spotifyConnectBtn.textContent = 'Collega';
       spotifyDisconnectBtn?.classList.add('hidden');
       renderSpotifyLibrary([], spotifyLibraryType);
       return;
     }
 
-    spotifyConnectBtn?.classList.add('hidden');
+    spotifyConnectBtn?.classList.remove('hidden');
+    if (spotifyConnectBtn) spotifyConnectBtn.textContent = 'Ricollega';
     spotifyDisconnectBtn?.classList.remove('hidden');
-    const profileName = data.profile?.displayName || data.profile?.spotifyUserId || 'Utente Spotify';
-    spotifyUserLabel.textContent = `Connesso: ${profileName}`;
+    const profileName = data.profile?.displayName || data.profile?.spotifyUserId || null;
+    spotifyUserLabel.textContent = profileName
+      ? `Connesso: ${profileName}`
+      : 'Connesso: profilo Spotify da ricollegare';
     await loadSpotifyLibrary(spotifyLibraryType);
   } catch (error) {
     spotifyConnected = false;
     spotifyUserLabel.textContent = 'Errore collegamento Spotify';
     spotifyConnectBtn?.classList.remove('hidden');
+    if (spotifyConnectBtn) spotifyConnectBtn.textContent = 'Ricollega';
     spotifyDisconnectBtn?.classList.add('hidden');
     renderSpotifyLibrary([], spotifyLibraryType);
   }

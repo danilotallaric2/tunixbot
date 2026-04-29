@@ -237,10 +237,30 @@ const createDashboardServer = (client) => {
     const response = await fetch(url.toString(), {
       headers: { Authorization: `Bearer ${account.accessToken}` }
     });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(data.error?.message || 'Errore richiesta Spotify.');
+
+    const raw = await response.text();
+    let data = {};
+    try {
+      data = raw ? JSON.parse(raw) : {};
+    } catch {
+      data = { raw: raw.slice(0, 500) };
     }
+
+    if (!response.ok) {
+      logger.warn(
+        `Spotify API request failed: endpoint=${endpoint} status=${response.status} body=${JSON.stringify(data).slice(0, 800)}`
+      );
+
+      const spotifyMessage = data.error?.message || data.error_description || data.error || 'Errore richiesta Spotify.';
+      if (response.status === 401) {
+        throw new Error(`${spotifyMessage} Ricollega Spotify dalla dashboard.`);
+      }
+      if (response.status === 403) {
+        throw new Error(`${spotifyMessage} Controlla che il tuo utente Spotify sia autorizzato nell'app Spotify Developer.`);
+      }
+      throw new Error(spotifyMessage);
+    }
+
     return data;
   };
 
@@ -500,7 +520,7 @@ const createDashboardServer = (client) => {
       scope: config.spotify.scopes.join(' '),
       redirect_uri: config.spotify.redirectUri,
       state,
-      show_dialog: 'false'
+      show_dialog: 'true'
     });
 
     res.redirect(`${SPOTIFY_ACCOUNTS_API}/authorize?${params.toString()}`);
@@ -579,7 +599,21 @@ const createDashboardServer = (client) => {
         return;
       }
 
-      const account = await ensureSpotifyAccessToken(req.session.user.id);
+      let account = await ensureSpotifyAccessToken(req.session.user.id);
+      if (!account.spotifyUserId) {
+        const profile = await fetchSpotifyProfile(account.accessToken);
+        if (profile?.id) {
+          account = {
+            ...account,
+            spotifyUserId: profile.id,
+            displayName: profile.display_name || profile.id,
+            country: profile.country || null,
+            avatarUrl: profile.images?.[0]?.url || null
+          };
+          await saveSpotifyAccount(req.session.user.id, account);
+        }
+      }
+
       res.json({
         connected: true,
         profile: {
