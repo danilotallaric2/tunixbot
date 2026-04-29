@@ -35,7 +35,7 @@ class MusicManager {
       config.lavalink.nodes,
       {
         reconnectTries: config.lavalink.reconnectTries,
-        reconnectInterval: config.lavalink.reconnectIntervalMs,
+        reconnectInterval: Math.max(1, Math.round(config.lavalink.reconnectIntervalMs / 1000)),
         nodeResolver: (nodes) => {
           if (nodes instanceof Map) return nodes.values().next().value;
           if (Array.isArray(nodes)) return nodes[0];
@@ -105,7 +105,7 @@ class MusicManager {
     const node = this.getIdealNodeSafe();
     if (!node) {
       throw new Error(
-        'Lavalink non e connesso al momento. Attendi qualche secondo e riprova.'
+        'Lavalink non e connesso al momento. Spotify e YouTube non possono riprodurre audio finche il nodo non torna online.'
       );
     }
     return node;
@@ -576,7 +576,7 @@ class MusicManager {
     if (queue.loopMode !== 'off') return false;
     if (queue.tracks.length > 0 || queue.current) return false;
 
-    const node = queue.player.node || this.shoukaku.getIdealNode();
+    const node = queue.player.node || this.getIdealNodeSafe();
     if (!node) return false;
 
     let autoTrack = null;
@@ -605,7 +605,7 @@ class MusicManager {
     const attempts = Number(failedTrack?.recoveryAttempts || 0);
     if (!failedTrack || attempts >= 2) return false;
 
-    const node = queue.player.node || this.shoukaku.getIdealNode();
+    const node = queue.player.node || this.getIdealNodeSafe();
     if (!node) return false;
 
     let replacement;
