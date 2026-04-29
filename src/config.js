@@ -42,7 +42,8 @@ const config = {
   music: {
     defaultVolume: parseIntOr(process.env.DEFAULT_VOLUME, 80),
     maxQueueSize: parseIntOr(process.env.MAX_QUEUE_SIZE, 500),
-    autoDisconnectMs: parseIntOr(process.env.AUTO_DISCONNECT_MS, 120000)
+    autoDisconnectMs: parseIntOr(process.env.AUTO_DISCONNECT_MS, 120000),
+    autoPlayRelatedWhenQueueEnds: parseBool(process.env.AUTO_PLAY_RELATED_WHEN_QUEUE_ENDS, true)
   },
   dashboard: {
     enabled: parseBool(process.env.DASHBOARD_ENABLED, true),

@@ -347,6 +347,114 @@ class MusicManager {
     });
   }
 
+  buildAutoplayQueries(seedTrack) {
+    const primaryArtist = String(seedTrack?.author || '')
+      .split(',')[0]
+      .trim();
+    const cleanTitle = this.cleanSpotifyTitle(seedTrack?.title || '');
+
+    const queries = [
+      `ytmsearch:${primaryArtist} mix`,
+      `ytsearch:${primaryArtist} mix`,
+      `ytmsearch:${primaryArtist} radio`,
+      `ytsearch:${primaryArtist} official audio`,
+      `ytmsearch:${cleanTitle} ${primaryArtist}`,
+      `ytsearch:${cleanTitle} ${primaryArtist}`
+    ];
+
+    const unique = [];
+    const seen = new Set();
+    for (const q of queries) {
+      const key = this.normalizeCompareText(q);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      unique.push(q);
+    }
+    return unique;
+  }
+
+  async resolveAutoplayTrack(node, seedTrack, requestedBy) {
+    const queries = this.buildAutoplayQueries(seedTrack);
+    if (!queries.length) return null;
+
+    const sameTitle = this.normalizeCompareText(this.cleanSpotifyTitle(seedTrack?.title || ''));
+    const sameArtist = this.normalizeCompareText(String(seedTrack?.author || '').split(',')[0].trim());
+    const rawCandidates = [];
+    const seenSignatures = new Set();
+
+    for (const query of queries) {
+      const result = await this.searchLavalink(node, query);
+      for (const raw of result.tracks.slice(0, 12)) {
+        const info = raw?.info || {};
+        const signature = this.buildFallbackSignature(raw);
+        if (!signature || seenSignatures.has(signature)) continue;
+        seenSignatures.add(signature);
+
+        const candidateTitle = this.normalizeCompareText(this.cleanSpotifyTitle(info.title || ''));
+        const candidateAuthor = this.normalizeCompareText(String(info.author || ''));
+        const candidateDuration = Number(info.length || 0);
+
+        if (!candidateTitle) continue;
+        if (candidateDuration > 0 && candidateDuration < 45000) continue;
+        if (sameTitle && candidateTitle === sameTitle) continue;
+        if (sameTitle && sameArtist && candidateTitle === sameTitle && candidateAuthor.includes(sameArtist)) continue;
+
+        rawCandidates.push(raw);
+      }
+    }
+
+    if (!rawCandidates.length) return null;
+
+    const scored = rawCandidates
+      .map((raw) => ({
+        raw,
+        score: this.scoreSpotifyCandidate(raw, {
+          title: seedTrack?.title || '',
+          author: seedTrack?.author || '',
+          duration: Number(seedTrack?.duration || 0)
+        })
+      }))
+      .sort((a, b) => b.score - a.score);
+
+    const preferred = scored.filter((entry) => entry.score >= 28);
+    const bucket = (preferred.length ? preferred : scored).slice(0, 10);
+    if (!bucket.length) return null;
+
+    const picked = bucket[Math.floor(Math.random() * bucket.length)].raw;
+    return this.buildTrack(picked, requestedBy || seedTrack?.requestedBy || this.client.user?.id || null);
+  }
+
+  async tryAutoplayWhenQueueEnds(queue, seedTrack) {
+    if (!config.music.autoPlayRelatedWhenQueueEnds) return false;
+    if (!seedTrack) return false;
+    if (queue.loopMode !== 'off') return false;
+    if (queue.tracks.length > 0 || queue.current) return false;
+
+    const node = queue.player.node || this.shoukaku.getIdealNode();
+    if (!node) return false;
+
+    let autoTrack = null;
+    try {
+      autoTrack = await this.resolveAutoplayTrack(node, seedTrack, seedTrack.requestedBy);
+    } catch (error) {
+      logger.warn(`Autoplay related lookup failed for guild ${queue.guildId}: ${error.message || error}`);
+      return false;
+    }
+    if (!autoTrack) return false;
+
+    queue.tracks.push(autoTrack);
+
+    await this.safeTextSend(queue.textChannelId, {
+      embeds: [
+        baseEmbed('Autoplay Attivo', config.theme.secondary).setDescription(
+          `Coda finita. Continuo con un brano simile:\n**${autoTrack.title}** - ${autoTrack.author}`
+        )
+      ]
+    });
+
+    return true;
+  }
+
   async tryRecoverFailedTrack(queue, failedTrack) {
     const attempts = Number(failedTrack?.recoveryAttempts || 0);
     if (!failedTrack || attempts >= 2) return false;
@@ -609,15 +717,22 @@ class MusicManager {
     queue.paused = false;
     queue.positionOffsetMs = 0;
     queue.startedAt = 0;
-    await this.playNext(queue);
+    await this.playNext(queue, { lastTrack: finishedTrack, endReason: reason });
   }
 
-  async playNext(queue) {
+  async playNext(queue, options = {}) {
+    const { lastTrack = null, endReason = 'manual' } = options;
     queue.clearDisconnectTimer();
 
     const next = queue.tracks.shift();
 
     if (!next) {
+      const allowAutoplay = ['finished', 'loadFailed', 'cleanup'].includes(endReason);
+      if (allowAutoplay) {
+        const startedAutoplay = await this.tryAutoplayWhenQueueEnds(queue, lastTrack);
+        if (startedAutoplay) return this.playNext(queue, { endReason: 'autoplay' });
+      }
+
       queue.current = null;
       await this.markNowPlayingAsEnded(queue, 'La coda e terminata.');
       return;
