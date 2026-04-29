@@ -111,6 +111,51 @@
         </div>
       </div>
 
+      <div id="trackInfoPanel" class="lyrics-panel hidden">
+        <div class="lyrics-card compact track-info-card">
+          <div class="lyrics-head">
+            <div>
+              <div class="lyrics-title">Dettagli Brano</div>
+              <div id="trackInfoContext" class="lyrics-track-label">-</div>
+            </div>
+            <button id="trackInfoCloseBtn" class="ctl">Chiudi</button>
+          </div>
+          <div class="track-info-layout">
+            <img id="trackInfoThumb" class="track-info-thumb" alt="cover" />
+            <div class="track-info-grid">
+              <div class="track-info-row">
+                <span>Titolo</span>
+                <b id="trackInfoTitle">-</b>
+              </div>
+              <div class="track-info-row">
+                <span>Artista</span>
+                <b id="trackInfoArtist">-</b>
+              </div>
+              <div class="track-info-row">
+                <span>Durata</span>
+                <b id="trackInfoDuration">-</b>
+              </div>
+              <div class="track-info-row">
+                <span>Sorgente</span>
+                <b id="trackInfoSource">-</b>
+              </div>
+              <div class="track-info-row">
+                <span>Stato</span>
+                <b id="trackInfoStatus">-</b>
+              </div>
+              <div class="track-info-row">
+                <span>Posizione coda</span>
+                <b id="trackInfoQueuePos">-</b>
+              </div>
+              <div class="track-info-row track-info-link">
+                <span>Link</span>
+                <a id="trackInfoUrl" href="#" target="_blank" rel="noopener noreferrer">-</a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="spotify-shell">
         <aside class="left-col panel">
           <div class="brand-block">
@@ -200,7 +245,7 @@
       </div>
 
       <footer class="player-footer">
-        <div class="player-left">
+        <div id="nowPlayingInfoTrigger" class="player-left">
           <img id="npThumb" class="np-thumb" alt="cover" />
           <div>
             <div id="npTitle" class="np-title">Nessun brano</div>

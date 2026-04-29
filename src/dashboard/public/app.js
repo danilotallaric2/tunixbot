@@ -63,6 +63,18 @@ const lyricsLoopBtn = document.getElementById('lyricsLoopBtn');
 const effectsPanel = document.getElementById('effectsPanel');
 const effectsCloseBtn = document.getElementById('effectsCloseBtn');
 const effectButtons = [...effectsPanel.querySelectorAll('[data-effect]')];
+const trackInfoPanel = document.getElementById('trackInfoPanel');
+const trackInfoCloseBtn = document.getElementById('trackInfoCloseBtn');
+const trackInfoThumb = document.getElementById('trackInfoThumb');
+const trackInfoTitle = document.getElementById('trackInfoTitle');
+const trackInfoArtist = document.getElementById('trackInfoArtist');
+const trackInfoDuration = document.getElementById('trackInfoDuration');
+const trackInfoSource = document.getElementById('trackInfoSource');
+const trackInfoStatus = document.getElementById('trackInfoStatus');
+const trackInfoQueuePos = document.getElementById('trackInfoQueuePos');
+const trackInfoContext = document.getElementById('trackInfoContext');
+const trackInfoUrl = document.getElementById('trackInfoUrl');
+const nowPlayingInfoTrigger = document.getElementById('nowPlayingInfoTrigger');
 
 const loopModes = ['off', 'song', 'queue'];
 const ANNOUNCEMENT_VERSION = '1.0.5';
@@ -263,6 +275,77 @@ const formatDuration = (ms) => {
   const m = Math.floor(sec / 60);
   const s = String(sec % 60).padStart(2, '0');
   return `${m}:${s}`;
+};
+
+const inferTrackSource = (url) => {
+  if (!url) return '-';
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    if (host.includes('spotify')) return 'Spotify';
+    if (host.includes('youtube') || host.includes('youtu.be')) return 'YouTube';
+  } catch {}
+  return 'Link esterno';
+};
+
+const shorten = (text, max = 68) => {
+  const value = String(text || '');
+  if (value.length <= max) return value;
+  return `${value.slice(0, max - 1)}...`;
+};
+
+const setTrackInfoOpen = (open) => {
+  if (!trackInfoPanel) return;
+  if (open) trackInfoPanel.classList.remove('hidden');
+  else trackInfoPanel.classList.add('hidden');
+};
+
+const showTrackInfo = (track, options = {}) => {
+  if (
+    !track ||
+    !trackInfoPanel ||
+    !trackInfoTitle ||
+    !trackInfoArtist ||
+    !trackInfoDuration ||
+    !trackInfoSource ||
+    !trackInfoStatus ||
+    !trackInfoQueuePos ||
+    !trackInfoContext ||
+    !trackInfoUrl ||
+    !trackInfoThumb
+  ) {
+    return;
+  }
+
+  const url = String(track.url || '').trim();
+  const title = track.title || '-';
+  const artist = track.author || '-';
+  const durationText = track.durationText || formatDuration(track.duration || 0);
+  const source = inferTrackSource(url);
+
+  trackInfoTitle.textContent = title;
+  trackInfoArtist.textContent = artist;
+  trackInfoDuration.textContent = durationText;
+  trackInfoSource.textContent = source;
+  trackInfoStatus.textContent = options.status || '-';
+  trackInfoQueuePos.textContent = options.queuePosition ? `#${options.queuePosition}` : '-';
+  trackInfoContext.textContent = options.context || 'Dettagli brano';
+
+  trackInfoThumb.src = track.thumbnail || '';
+  trackInfoThumb.alt = title !== '-' ? `cover ${title}` : 'cover';
+
+  if (url) {
+    trackInfoUrl.textContent = shorten(url);
+    trackInfoUrl.href = url;
+    trackInfoUrl.classList.remove('disabled');
+    trackInfoUrl.tabIndex = 0;
+  } else {
+    trackInfoUrl.textContent = 'Non disponibile';
+    trackInfoUrl.removeAttribute('href');
+    trackInfoUrl.classList.add('disabled');
+    trackInfoUrl.tabIndex = -1;
+  }
+
+  setTrackInfoOpen(true);
 };
 
 const ensureCanControl = () => {
@@ -513,6 +596,7 @@ const renderQueue = (queue) => {
   for (const [idx, track] of queue.slice(0, 18).entries()) {
     const item = document.createElement('div');
     item.className = 'queue-item';
+    item.dataset.queueIndex = String(idx + 1);
     item.innerHTML = `
       <img src="${track.thumbnail || ''}" alt="cover" />
       <div>
@@ -539,8 +623,16 @@ const buildCard = (track) => {
     <button>Play</button>
   `;
 
-  card.querySelector('button').addEventListener('click', () => {
+  card.querySelector('button').addEventListener('click', (event) => {
+    event.stopPropagation();
     enqueue(track.url || `${track.title} ${track.author}`);
+  });
+
+  card.addEventListener('click', () => {
+    showTrackInfo(track, {
+      context: 'Dettaglio risultato',
+      status: 'Pronto per la coda'
+    });
   });
 
   return card;
@@ -902,17 +994,33 @@ document.querySelectorAll('[data-action]').forEach((btn) => {
 
 queueList.addEventListener('click', async (event) => {
   const target = event.target;
-  if (!(target instanceof HTMLElement)) return;
+  if (!(target instanceof Element)) return;
 
-  const action = target.dataset.queueAction;
-  const index = Number(target.dataset.index || 0);
-  if (!action || !index) return;
+  const actionBtn = target.closest('[data-queue-action]');
+  if (actionBtn instanceof HTMLElement) {
+    const action = actionBtn.dataset.queueAction;
+    const index = Number(actionBtn.dataset.index || 0);
+    if (!action || !index) return;
 
-  const ok = await control(action, index);
-  if (!ok) return;
+    const ok = await control(action, index);
+    if (!ok) return;
 
-  if (action === 'remove') setStatus(`Brano #${index} rimosso dalla coda`);
-  if (action === 'play_index') setStatus(`Passo al brano #${index}...`);
+    if (action === 'remove') setStatus(`Brano #${index} rimosso dalla coda`);
+    if (action === 'play_index') setStatus(`Passo al brano #${index}...`);
+    return;
+  }
+
+  const queueItem = target.closest('.queue-item');
+  if (!(queueItem instanceof HTMLElement)) return;
+
+  const queueIndex = Number(queueItem.dataset.queueIndex || 0);
+  if (!queueIndex || !state?.queue?.[queueIndex - 1]) return;
+
+  showTrackInfo(state.queue[queueIndex - 1], {
+    context: 'Dettaglio dalla coda',
+    status: 'In coda',
+    queuePosition: queueIndex
+  });
 });
 
 clearQueueBtn?.addEventListener('click', async () => {
@@ -923,6 +1031,25 @@ clearQueueBtn?.addEventListener('click', async () => {
 versionPopupCloseBtn?.addEventListener('click', dismissVersionPopup);
 versionPopup?.addEventListener('click', (event) => {
   if (event.target === versionPopup) dismissVersionPopup();
+});
+
+trackInfoCloseBtn?.addEventListener('click', () => setTrackInfoOpen(false));
+trackInfoPanel?.addEventListener('click', (event) => {
+  if (event.target === trackInfoPanel) setTrackInfoOpen(false);
+});
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    setTrackInfoOpen(false);
+  }
+});
+
+nowPlayingInfoTrigger?.addEventListener('click', () => {
+  if (!state?.current) return;
+  showTrackInfo(state.current, {
+    context: 'Dettaglio ora in riproduzione',
+    status: state.paused ? 'In pausa' : 'In riproduzione'
+  });
 });
 
 seekRange.addEventListener('change', () => {
