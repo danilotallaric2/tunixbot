@@ -1362,41 +1362,101 @@ input[type='range']::-moz-range-thumb {
 }
 
 @media (max-width: 1024px) {
+  html,
+  body {
+    overflow: auto;
+  }
+
   .app {
+    min-height: 100svh;
+    padding: 6px;
     padding-bottom: 184px;
   }
 
   .spotify-shell {
-    display: flex;
-    flex-direction: column;
-    height: calc(100vh - 196px);
+    display: grid;
+    grid-template-columns: 1fr;
+    height: auto;
+    min-height: 0;
+    gap: 10px;
+  }
+
+  .left-col,
+  .center-col,
+  .right-col {
+    min-height: 0;
+    overflow: visible;
   }
 
   .left-col {
-    max-height: 38vh;
+    max-height: none;
+    padding: 10px;
+    gap: 10px;
   }
 
   .center-col {
-    flex: 1;
+    min-height: 52vh;
+  }
+
+  .right-col {
+    display: flex;
+    min-height: 220px;
+    max-height: 40vh;
+  }
+
+  .queue-list {
+    max-height: calc(40vh - 58px);
   }
 
   .player-footer {
     height: auto;
-    max-height: min(42vh, 190px);
+    max-height: none;
     grid-template-columns: 1fr;
-    gap: 10px;
-    padding: 10px 12px;
-    overflow-y: auto;
+    gap: 8px;
+    padding: 8px 10px calc(10px + env(safe-area-inset-bottom));
+    overflow: hidden;
   }
 
   .player-left,
   .player-center,
   .player-right {
     width: 100%;
+    min-width: 0;
+  }
+
+  .player-left {
+    display: grid;
+    grid-template-columns: 56px minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .np-thumb {
+    width: 56px;
+    height: 56px;
   }
 
   .search-area {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      'input input'
+      'source source'
+      'search play';
+  }
+
+  #searchInput {
+    grid-area: input;
+  }
+
+  .source-picker {
+    grid-area: source;
+  }
+
+  #searchBtn {
+    grid-area: search;
+  }
+
+  #playBtn {
+    grid-area: play;
   }
 
   .lyrics-layout {
@@ -1412,15 +1472,31 @@ input[type='range']::-moz-range-thumb {
     font-size: 1.62rem;
   }
 
+  .seek-row {
+    width: 100%;
+    margin: 0;
+    grid-template-columns: 72px minmax(0, 1fr);
+  }
+
+  .spotify-controls {
+    gap: 8px;
+  }
+
   .quick-actions {
-    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .quick-actions .ctl {
+    min-width: 0;
+    padding: 0 8px;
   }
 }
 
 @media (max-width: 720px) {
   .app {
     padding: 6px;
-    padding-bottom: 210px;
+    padding-bottom: 220px;
   }
 
   .panel,
@@ -1430,13 +1506,13 @@ input[type='range']::-moz-range-thumb {
   }
 
   .left-col {
-    max-height: 42vh;
     padding: 10px;
     gap: 10px;
   }
 
   .top-nav {
     padding: 10px;
+    align-items: flex-start;
   }
 
   .home-dot {
@@ -1448,6 +1524,7 @@ input[type='range']::-moz-range-thumb {
   .discover-grid,
   .results-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
   }
 
   .song-card {
@@ -1486,6 +1563,28 @@ input[type='range']::-moz-range-thumb {
     transform: scale(0.9);
   }
 
+  .volume-row {
+    grid-template-columns: 18px 50px 38px minmax(0, 1fr);
+    gap: 6px;
+  }
+
+  .quick-actions .ctl {
+    height: 32px;
+    font-size: 0.74rem;
+  }
+
+  .lyrics-card {
+    width: 100%;
+    max-height: 92svh;
+    overflow: auto;
+    padding: 12px;
+  }
+
+  .lyrics-body {
+    min-height: 40svh;
+    max-height: none;
+  }
+
   .action-btn span {
     font-size: 0.73rem;
   }
@@ -1508,5 +1607,86 @@ input[type='range']::-moz-range-thumb {
 
   .join-popup:not(.hidden) + .toast-viewport {
     top: 92px;
+  }
+}
+
+@media (max-width: 560px) {
+  .app {
+    padding-bottom: 232px;
+  }
+
+  .search-area {
+    grid-template-columns: 1fr;
+    grid-template-areas: none;
+  }
+
+  #searchInput,
+  .source-picker,
+  #searchBtn,
+  #playBtn {
+    grid-area: auto;
+    width: 100%;
+  }
+
+  .section-head h2 {
+    font-size: 1.12rem;
+  }
+
+  .player-left {
+    grid-template-columns: 46px minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .np-thumb {
+    width: 46px;
+    height: 46px;
+  }
+
+  .np-artist,
+  .effect-label {
+    display: none;
+  }
+
+  .icon-btn {
+    width: 32px;
+    min-width: 32px;
+    height: 32px;
+  }
+
+  .icon-btn.play-main {
+    width: 40px;
+    min-width: 40px;
+    height: 40px;
+  }
+
+  .seek-row {
+    grid-template-columns: 62px minmax(0, 1fr);
+  }
+
+  .seek-row span {
+    font-size: 0.72rem;
+  }
+
+  .volume-row {
+    grid-template-columns: 16px 44px 34px minmax(0, 1fr);
+  }
+
+  .volume-row span {
+    font-size: 0.72rem;
+  }
+
+  .action-btn {
+    gap: 0;
+  }
+
+  .action-btn span {
+    display: none;
+  }
+}
+
+@media (max-width: 420px) {
+  .discover-grid,
+  .results-grid {
+    grid-template-columns: 1fr;
   }
 }
