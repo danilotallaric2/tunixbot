@@ -65,7 +65,8 @@ const effectsPanel = document.getElementById('effectsPanel');
 const effectsCloseBtn = document.getElementById('effectsCloseBtn');
 
 const loopModes = ['off', 'song', 'queue'];
-const LYRICS_SYNC_DELAY_MS = 0;
+// Negative value means "show lyrics earlier than audio".
+const LYRICS_SYNC_DELAY_MS = -1000;
 const SERVER_PROGRESS_BACKWARD_TOLERANCE_MS = 350;
 const SERVER_PROGRESS_HARD_RESET_BACKWARD_MS = 3500;
 const SERVER_PROGRESS_MAX_SOFT_BACKSTEP_MS = 120;
