@@ -22,6 +22,7 @@ const discoverWrap = document.getElementById('discoverWrap');
 const results = document.getElementById('results');
 const resultsCount = document.getElementById('resultsCount');
 const queueList = document.getElementById('queueList');
+const clearQueueBtn = document.getElementById('clearQueueBtn');
 const statusPill = document.getElementById('statusPill');
 
 const npThumb = document.getElementById('npThumb');
@@ -755,6 +756,11 @@ queueList.addEventListener('click', async (event) => {
 
   if (action === 'remove') setStatus(`Brano #${index} rimosso dalla coda`);
   if (action === 'play_index') setStatus(`Passo al brano #${index}...`);
+});
+
+clearQueueBtn?.addEventListener('click', async () => {
+  const ok = await control('clear');
+  if (ok) setStatus('Coda svuotata');
 });
 
 seekRange.addEventListener('change', () => {
