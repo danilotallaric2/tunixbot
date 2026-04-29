@@ -22,11 +22,20 @@ class MusicManager {
     this.client = client;
     this.queues = new Map();
     this.spotify = new SpotifyService(config.spotify);
+    this.lavalinkCloseStats = {
+      lastLogAt: 0,
+      suppressedCount: 0,
+      lastName: null,
+      lastCode: null,
+      lastReason: ''
+    };
 
     this.shoukaku = new Shoukaku(
       new Connectors.DiscordJS(client),
       config.lavalink.nodes,
       {
+        reconnectTries: config.lavalink.reconnectTries,
+        reconnectInterval: config.lavalink.reconnectIntervalMs,
         nodeResolver: (nodes) => {
           if (nodes instanceof Map) return nodes.values().next().value;
           if (Array.isArray(nodes)) return nodes[0];
@@ -40,13 +49,66 @@ class MusicManager {
 
   static ALONE_DISCONNECT_MS = 10000;
   static TRACK_START_TIMEOUT_MS = 12000;
+  static LAVALINK_CLOSE_LOG_WINDOW_MS = 5000;
 
   attachShoukakuEvents() {
-    this.shoukaku.on('ready', (name) => logger.info(`Lavalink node ready: ${name}`));
+    this.shoukaku.on('ready', (name) => {
+      this.flushSuppressedCloseLogs();
+      logger.info(`Lavalink node ready: ${name}`);
+    });
     this.shoukaku.on('error', (name, error) => logger.error(`Lavalink node error (${name})`, error));
     this.shoukaku.on('close', (name, code, reason) => {
-      logger.warn(`Lavalink node closed (${name}) code=${code} reason=${String(reason)}`);
+      const message = `Lavalink node closed (${name}) code=${code} reason=${String(reason || '')}`;
+      const now = Date.now();
+      const sinceLast = now - this.lavalinkCloseStats.lastLogAt;
+
+      if (sinceLast < MusicManager.LAVALINK_CLOSE_LOG_WINDOW_MS) {
+        this.lavalinkCloseStats.suppressedCount += 1;
+        this.lavalinkCloseStats.lastName = name;
+        this.lavalinkCloseStats.lastCode = code;
+        this.lavalinkCloseStats.lastReason = String(reason || '');
+        return;
+      }
+
+      this.flushSuppressedCloseLogs();
+      logger.warn(message);
+      this.lavalinkCloseStats.lastLogAt = now;
     });
+  }
+
+  flushSuppressedCloseLogs() {
+    const count = Number(this.lavalinkCloseStats.suppressedCount || 0);
+    if (!count) return;
+
+    logger.warn(
+      `Lavalink close spam ridotto: altri ${count} eventi close soppressi ` +
+        `(last=${this.lavalinkCloseStats.lastName || '-'} code=${this.lavalinkCloseStats.lastCode ?? '-'} ` +
+        `reason=${this.lavalinkCloseStats.lastReason || ''})`
+    );
+
+    this.lavalinkCloseStats.suppressedCount = 0;
+    this.lavalinkCloseStats.lastName = null;
+    this.lavalinkCloseStats.lastCode = null;
+    this.lavalinkCloseStats.lastReason = '';
+    this.lavalinkCloseStats.lastLogAt = Date.now();
+  }
+
+  getIdealNodeSafe() {
+    try {
+      return this.shoukaku.getIdealNode();
+    } catch {
+      return null;
+    }
+  }
+
+  assertLavalinkAvailable() {
+    const node = this.getIdealNodeSafe();
+    if (!node) {
+      throw new Error(
+        'Lavalink non e connesso al momento. Attendi qualche secondo e riprova.'
+      );
+    }
+    return node;
   }
 
   async init() {
@@ -647,6 +709,7 @@ class MusicManager {
   }
 
   async createQueue(interaction, voiceChannel) {
+    this.assertLavalinkAvailable();
     const shardId = Number.isInteger(interaction.guild.shardId) ? interaction.guild.shardId : 0;
 
     const player = await this.shoukaku.joinVoiceChannel({
@@ -674,6 +737,7 @@ class MusicManager {
   }
 
   async createQueueByIds({ guildId, voiceChannelId, textChannelId }) {
+    this.assertLavalinkAvailable();
     const guild = this.client.guilds.cache.get(guildId) || (await this.client.guilds.fetch(guildId).catch(() => null));
     if (!guild) throw new Error('Guild non trovata.');
 
@@ -957,6 +1021,7 @@ class MusicManager {
   }
 
   async enqueueQuery({ guildId, query, voiceChannelId, textChannelId, requestedBy }) {
+    this.assertLavalinkAvailable();
     const existing = this.getQueue(guildId);
     const queue = existing || (await this.createQueueByIds({ guildId, voiceChannelId, textChannelId }));
 
@@ -966,7 +1031,7 @@ class MusicManager {
 
     queue.textChannelId = textChannelId;
 
-    const node = queue.player.node || this.shoukaku.getIdealNode();
+    const node = queue.player.node || this.getIdealNodeSafe();
     if (!node) throw new Error('Nessun nodo Lavalink disponibile.');
 
     const resolved = await this.resolvePlayableTracks(node, query, requestedBy);
@@ -1033,6 +1098,7 @@ class MusicManager {
   }
 
   async join(interaction, voiceChannel) {
+    this.assertLavalinkAvailable();
     const existing = this.getQueue(interaction.guildId);
     if (existing) {
       if (existing.voiceChannelId !== voiceChannel.id) {
@@ -1446,7 +1512,7 @@ class MusicManager {
       });
     }
 
-    const node = this.shoukaku.getIdealNode();
+    const node = this.getIdealNodeSafe();
     if (!node) throw new Error('Nessun nodo Lavalink disponibile.');
 
     const result = await this.searchLavalink(node, `ytmsearch:${query}`);

@@ -35,7 +35,9 @@ const config = {
         auth: process.env.LAVALINK_PASSWORD || 'youshallnotpass',
         secure: parseBool(process.env.LAVALINK_SECURE, false)
       }
-    ]
+    ],
+    reconnectTries: parseIntOr(process.env.LAVALINK_RECONNECT_TRIES, 999999),
+    reconnectIntervalMs: Math.max(500, parseIntOr(process.env.LAVALINK_RECONNECT_INTERVAL_MS, 5000))
   },
   spotify: {
     clientId: process.env.SPOTIFY_CLIENT_ID,
