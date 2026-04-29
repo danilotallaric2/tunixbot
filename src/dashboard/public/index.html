@@ -19,6 +19,25 @@
     </div>
 
     <div id="appRoot" class="app hidden">
+      <div id="versionPopup" class="version-popup-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="versionPopupTitle">
+        <div class="version-popup-card glass">
+          <div id="versionConfetti" class="version-confetti" aria-hidden="true"></div>
+          <div class="version-badge">Nuova versione</div>
+          <h2 id="versionPopupTitle">TunixBot 1.0.5</h2>
+          <div class="version-popup-text">
+            Abbiamo aggiornato:
+          </div>
+          <ul class="version-list">
+            <li>Spotify OAuth multi-utente in dashboard</li>
+            <li>Libreria Spotify in dashboard (playlist + preferiti)</li>
+            <li>Play diretto nel bot da elementi Spotify</li>
+            <li>Lyrics syncata</li>
+            <li>Gestione coda migliorata (play index, remove, clear)</li>
+          </ul>
+          <button id="versionPopupCloseBtn" class="ctl main">Ho capito</button>
+        </div>
+      </div>
+
       <div id="joinPopup" class="join-popup hidden" role="status" aria-live="polite">
         <div class="join-popup-card">
           <div class="join-popup-title">Sessione non trovata</div>

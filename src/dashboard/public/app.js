@@ -1,6 +1,9 @@
 const authGate = document.getElementById('authGate');
 const appRoot = document.getElementById('appRoot');
 const joinPopup = document.getElementById('joinPopup');
+const versionPopup = document.getElementById('versionPopup');
+const versionPopupCloseBtn = document.getElementById('versionPopupCloseBtn');
+const versionConfetti = document.getElementById('versionConfetti');
 
 const userAvatar = document.getElementById('userAvatar');
 const userName = document.getElementById('userName');
@@ -65,6 +68,8 @@ const effectsPanel = document.getElementById('effectsPanel');
 const effectsCloseBtn = document.getElementById('effectsCloseBtn');
 
 const loopModes = ['off', 'song', 'queue'];
+const ANNOUNCEMENT_VERSION = '1.0.5';
+const ANNOUNCEMENT_COOKIE = 'tunixbot_announcement_dismissed';
 // Negative value means "show lyrics earlier than audio".
 const LYRICS_SYNC_DELAY_MS = -1000;
 const SERVER_PROGRESS_BACKWARD_TOLERANCE_MS = 350;
@@ -123,6 +128,51 @@ const api = async (url, options = {}) => {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'Errore API');
   return data;
+};
+
+const readCookie = (name) => {
+  const key = `${name}=`;
+  const parts = document.cookie.split(';');
+  for (const part of parts) {
+    const trimmed = part.trim();
+    if (trimmed.startsWith(key)) return decodeURIComponent(trimmed.slice(key.length));
+  }
+  return null;
+};
+
+const writeCookie = (name, value, days = 365) => {
+  const expires = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toUTCString();
+  document.cookie = `${name}=${encodeURIComponent(value)}; expires=${expires}; path=/; SameSite=Lax`;
+};
+
+const spawnVersionConfetti = () => {
+  if (!versionConfetti) return;
+  versionConfetti.innerHTML = '';
+  const colors = ['#27d3ff', '#6d5cff', '#7ce7ff', '#ff6b7a', '#4afc8a', '#ffc14d'];
+
+  for (let i = 0; i < 34; i += 1) {
+    const piece = document.createElement('span');
+    piece.className = 'confetti-piece';
+    piece.style.left = `${Math.random() * 100}%`;
+    piece.style.background = colors[Math.floor(Math.random() * colors.length)];
+    piece.style.animationDelay = `${Math.random() * 420}ms`;
+    piece.style.transform = `rotate(${Math.floor(Math.random() * 360)}deg)`;
+    versionConfetti.appendChild(piece);
+  }
+};
+
+const showVersionPopupIfNeeded = () => {
+  if (!versionPopup) return;
+  const dismissedVersion = readCookie(ANNOUNCEMENT_COOKIE);
+  if (dismissedVersion === ANNOUNCEMENT_VERSION) return;
+  versionPopup.classList.remove('hidden');
+  spawnVersionConfetti();
+};
+
+const dismissVersionPopup = () => {
+  if (!versionPopup) return;
+  writeCookie(ANNOUNCEMENT_COOKIE, ANNOUNCEMENT_VERSION, 365);
+  versionPopup.classList.add('hidden');
 };
 
 const setStatus = (text, isError = false) => {
@@ -736,6 +786,7 @@ const bootstrap = async () => {
   await loadSpotifyStatus();
   await loadDiscover();
   setViewMode('discover');
+  showVersionPopupIfNeeded();
 
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = setInterval(() => refreshSession().catch(() => {}), 2500);
@@ -878,6 +929,11 @@ queueList.addEventListener('click', async (event) => {
 clearQueueBtn?.addEventListener('click', async () => {
   const ok = await control('clear');
   if (ok) setStatus('Coda svuotata');
+});
+
+versionPopupCloseBtn?.addEventListener('click', dismissVersionPopup);
+versionPopup?.addEventListener('click', (event) => {
+  if (event.target === versionPopup) dismissVersionPopup();
 });
 
 spotifyConnectBtn?.addEventListener('click', () => {
