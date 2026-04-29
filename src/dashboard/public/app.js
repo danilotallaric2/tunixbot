@@ -17,6 +17,7 @@ const searchInput = document.getElementById('searchInput');
 const searchBtn = document.getElementById('searchBtn');
 const playBtn = document.getElementById('playBtn');
 const searchSourceSelect = document.getElementById('searchSourceSelect');
+const searchSourceBadge = document.getElementById('searchSourceBadge');
 const discoverSection = document.getElementById('discoverSection');
 const resultsSection = document.getElementById('resultsSection');
 
@@ -148,7 +149,7 @@ const writeCookie = (name, value, days = 365) => {
 const spawnVersionConfetti = () => {
   if (!versionConfetti) return;
   versionConfetti.innerHTML = '';
-  const colors = ['#27d3ff', '#6d5cff', '#7ce7ff', '#ff6b7a', '#4afc8a', '#ffc14d'];
+  const colors = ['#27d3ff', '#6d5cff', '#7ce7ff', '#ff6b7a', '#4bc2ff', '#ffc14d'];
 
   for (let i = 0; i < 34; i += 1) {
     const piece = document.createElement('span');
@@ -176,10 +177,39 @@ const dismissVersionPopup = () => {
 };
 
 const setStatus = (text, isError = false) => {
-  statusPill.textContent = text;
-  statusPill.style.background = isError
-    ? 'linear-gradient(120deg,#ffd2d7,#ff6b7a)'
-    : 'linear-gradient(120deg,#a8efff,#27d3ff)';
+  if (!statusPill) return;
+  const message = String(text || '');
+
+  const statusTextEl = statusPill.querySelector('.status-text');
+  if (statusTextEl) statusTextEl.textContent = message;
+  else statusPill.textContent = message;
+
+  statusPill.classList.remove('status-ok', 'status-error', 'status-info');
+  if (isError) {
+    statusPill.classList.add('status-error');
+    return;
+  }
+
+  const normalized = message.toLowerCase();
+  if (normalized.includes('connesso e pronto') || normalized === 'pronto') {
+    statusPill.classList.add('status-ok');
+  } else {
+    statusPill.classList.add('status-info');
+  }
+};
+
+const setPlayPauseVisual = (button, paused = true) => {
+  if (!button) return;
+  button.classList.toggle('is-paused', paused);
+  button.classList.toggle('is-playing', !paused);
+  button.setAttribute('aria-label', paused ? 'Riprendi riproduzione' : 'Metti in pausa');
+};
+
+const updateSourceBadge = () => {
+  if (!searchSourceBadge || !searchSourceSelect) return;
+  const source = searchSourceSelect.value === 'youtube' ? 'youtube' : 'spotify';
+  searchSourceBadge.classList.toggle('youtube', source === 'youtube');
+  searchSourceBadge.classList.toggle('spotify', source === 'spotify');
 };
 
 const setSpotifyTab = (type) => {
@@ -389,10 +419,19 @@ const updateLyricsProgress = () => {
 
 const updateLoopButtonLabels = () => {
   const mode = state?.loop || 'off';
-  loopBtn.textContent = 'Loop';
-  loopBtn.title = `Loop: ${mode}`;
-  lyricsLoopBtn.textContent = 'Loop';
-  lyricsLoopBtn.title = `Loop: ${mode}`;
+  const visualMap = { off: 'OFF', song: 'ONE', queue: 'ALL' };
+  const loopLabel = visualMap[mode] || 'OFF';
+
+  const applyLoopVisual = (button) => {
+    if (!button) return;
+    button.title = `Loop: ${mode}`;
+    button.dataset.mode = mode;
+    const stateLabel = button.querySelector('.loop-state');
+    if (stateLabel) stateLabel.textContent = loopLabel;
+  };
+
+  applyLoopVisual(loopBtn);
+  applyLoopVisual(lyricsLoopBtn);
 };
 
 const loadLyricsForCurrentTrack = async () => {
@@ -611,8 +650,8 @@ const renderNowPlaying = (s) => {
     seekRange.value = '0';
     lyricsSeekRange.max = '100';
     lyricsSeekRange.value = '0';
-    playPauseBtn.textContent = '▶';
-    lyricsPlayPauseBtn.textContent = '▶';
+    setPlayPauseVisual(playPauseBtn, true);
+    setPlayPauseVisual(lyricsPlayPauseBtn, true);
   } else {
     npThumb.src = s.current.thumbnail || '';
     npTitle.textContent = s.current.title;
@@ -620,8 +659,8 @@ const renderNowPlaying = (s) => {
     lyricsNpThumb.src = s.current.thumbnail || '';
     lyricsNpTitle.textContent = s.current.title;
     lyricsNpArtist.textContent = s.current.author;
-    playPauseBtn.textContent = s.paused ? '▶' : '⏸';
-    lyricsPlayPauseBtn.textContent = s.paused ? '▶' : '⏸';
+    setPlayPauseVisual(playPauseBtn, Boolean(s.paused));
+    setPlayPauseVisual(lyricsPlayPauseBtn, Boolean(s.paused));
     renderProgressOnly();
   }
 
@@ -786,6 +825,7 @@ const bootstrap = async () => {
   await loadSpotifyStatus();
   await loadDiscover();
   setViewMode('discover');
+  updateSourceBadge();
   showVersionPopupIfNeeded();
 
   if (pollTimer) clearInterval(pollTimer);
@@ -803,6 +843,7 @@ searchBtn.addEventListener('click', () => search());
 searchInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') search();
 });
+searchSourceSelect?.addEventListener('change', updateSourceBadge);
 searchInput.addEventListener('input', () => {
   if (!searchInput.value.trim()) {
     renderResults([]);
