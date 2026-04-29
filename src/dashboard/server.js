@@ -201,6 +201,36 @@ const createDashboardServer = (client) => {
     return data;
   };
 
+  const fetchLikedTrackUrls = async (discordUserId, maxCount) => {
+    const out = [];
+    let offset = 0;
+    const limit = 50;
+
+    while (out.length < maxCount) {
+      const data = await spotifyRequest(discordUserId, '/me/tracks', {
+        market: config.spotify.market,
+        limit,
+        offset
+      });
+
+      const items = Array.isArray(data.items) ? data.items : [];
+      if (!items.length) break;
+
+      for (const entry of items) {
+        const t = entry?.track;
+        const url = t?.external_urls?.spotify || (t?.id ? `https://open.spotify.com/track/${t.id}` : null);
+        if (!url) continue;
+        out.push(url);
+        if (out.length >= maxCount) break;
+      }
+
+      offset += items.length;
+      if (!data.next) break;
+    }
+
+    return out;
+  };
+
   const fetchDiscordToken = async (code) => {
     const body = new URLSearchParams({
       client_id: config.discord.clientId,
@@ -586,6 +616,52 @@ const createDashboardServer = (client) => {
       res.status(400).json({ error: 'Tipo libreria non supportato. Usa playlists o liked.' });
     } catch (error) {
       res.status(500).json({ error: error.message || 'Errore libreria Spotify' });
+    }
+  });
+
+  app.post('/api/spotify/liked/enqueue', requireAuth, async (req, res) => {
+    if (!requireSpotifyEnabled(res)) return;
+
+    try {
+      const { session, queue } = await requireControllableSession(req);
+      const currentSize = queue.tracks.length + (queue.current ? 1 : 0);
+      const available = Math.max(0, config.music.maxQueueSize - currentSize);
+      if (available <= 0) {
+        throw new Error(`Coda piena. Limite massimo: ${config.music.maxQueueSize} brani.`);
+      }
+
+      const likedUrls = await fetchLikedTrackUrls(req.session.user.id, available);
+      if (!likedUrls.length) throw new Error('Nessun brano nei preferiti Spotify.');
+
+      let addedCount = 0;
+      let skippedCount = 0;
+
+      for (const url of likedUrls) {
+        try {
+          const r = await client.musicManager.enqueueQuery({
+            guildId: session.guildId,
+            voiceChannelId: queue.voiceChannelId,
+            textChannelId: queue.textChannelId,
+            query: url,
+            requestedBy: req.session.user.id
+          });
+          addedCount += Number(r.addedCount || 0);
+          skippedCount += Number(r.skippedCount || 0);
+        } catch {
+          skippedCount += 1;
+        }
+      }
+
+      const payload = await buildSessionPayload(req);
+      res.json({
+        ok: true,
+        addedCount,
+        skippedCount,
+        processedCount: likedUrls.length,
+        ...payload
+      });
+    } catch (error) {
+      res.status(500).json({ error: error.message || 'Errore enqueue preferiti Spotify' });
     }
   });
 

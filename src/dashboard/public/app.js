@@ -137,6 +137,31 @@ const setSpotifyTab = (type) => {
   spotifyTabLiked?.classList.toggle('main', type === 'liked');
 };
 
+const renderSpotifyLikedBulkView = () => {
+  spotifyLibraryList.innerHTML = `
+    <div class="spotify-liked-bulk">
+      <div class="spotify-lib-title">Brani preferiti Spotify</div>
+      <div class="spotify-lib-sub">Metto direttamente tutti i preferiti in coda (senza lista).</div>
+      <button id="spotifyEnqueueLikedBtn" class="ctl main">Aggiungi tutti in coda</button>
+    </div>
+  `;
+
+  const btn = document.getElementById('spotifyEnqueueLikedBtn');
+  btn?.addEventListener('click', async () => {
+    try {
+      ensureCanControl();
+      setStatus('Carico preferiti Spotify in coda...');
+      const payload = await api('/api/spotify/liked/enqueue', { method: 'POST' });
+      await refreshSession();
+      const added = Number(payload?.addedCount || 0);
+      const skipped = Number(payload?.skippedCount || 0);
+      setStatus(`Preferiti aggiunti: ${added}${skipped > 0 ? `, saltati: ${skipped}` : ''}`);
+    } catch (error) {
+      setStatus(error.message, true);
+    }
+  });
+};
+
 const formatDuration = (ms) => {
   const sec = Math.max(0, Math.floor((ms || 0) / 1000));
   const m = Math.floor(sec / 60);
@@ -432,6 +457,11 @@ const loadSpotifyLibrary = async (type = spotifyLibraryType) => {
   setSpotifyTab(type);
   if (!spotifyConnected) {
     renderSpotifyLibrary([], type);
+    return;
+  }
+
+  if (type === 'liked') {
+    renderSpotifyLikedBulkView();
     return;
   }
 
