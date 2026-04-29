@@ -12,12 +12,19 @@ const parseIntOr = (value, fallback) => {
   return Number.isNaN(n) ? fallback : n;
 };
 
+const trimTrailingSlash = (value) => String(value || '').replace(/\/+$/, '');
+
+const fallbackDashboardPublicUrl = () =>
+  process.env.DASHBOARD_PUBLIC_URL || `http://${process.env.DASHBOARD_HOST || '127.0.0.1'}:${parseIntOr(process.env.DASHBOARD_PORT, 3000)}`;
+
+const buildDefaultOAuthRedirect = (pathName) => `${trimTrailingSlash(fallbackDashboardPublicUrl())}${pathName}`;
+
 const config = {
   discord: {
     token: process.env.DISCORD_TOKEN,
     clientId: process.env.DISCORD_CLIENT_ID,
     clientSecret: process.env.DISCORD_CLIENT_SECRET || null,
-    redirectUri: process.env.DISCORD_REDIRECT_URI || 'http://127.0.0.1:3000/auth/discord/callback',
+    redirectUri: process.env.DISCORD_REDIRECT_URI || buildDefaultOAuthRedirect('/auth/discord/callback'),
     guildId: process.env.DISCORD_GUILD_ID || null
   },
   lavalink: {
@@ -34,7 +41,7 @@ const config = {
     clientId: process.env.SPOTIFY_CLIENT_ID,
     clientSecret: process.env.SPOTIFY_CLIENT_SECRET,
     market: process.env.SPOTIFY_MARKET || 'US',
-    redirectUri: process.env.SPOTIFY_REDIRECT_URI || 'http://127.0.0.1:3000/auth/spotify/callback',
+    redirectUri: process.env.SPOTIFY_REDIRECT_URI || buildDefaultOAuthRedirect('/auth/spotify/callback'),
     scopes: (process.env.SPOTIFY_SCOPES || 'user-read-private user-read-email playlist-read-private playlist-read-collaborative user-library-read')
       .split(/\s+/)
       .filter(Boolean)

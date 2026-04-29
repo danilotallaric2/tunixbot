@@ -576,7 +576,7 @@ const loadSpotifyStatus = async () => {
     const data = await api('/api/spotify/status');
     spotifyConnected = Boolean(data.connected);
     if (!spotifyConnected) {
-      spotifyUserLabel.textContent = 'Non collegato';
+      spotifyUserLabel.textContent = data.error || 'Non collegato';
       spotifyConnectBtn?.classList.remove('hidden');
       if (spotifyConnectBtn) spotifyConnectBtn.textContent = 'Collega';
       spotifyDisconnectBtn?.classList.add('hidden');

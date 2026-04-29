@@ -171,7 +171,7 @@ const createDashboardServer = (client) => {
     return data;
   };
 
-  const fetchSpotifyProfile = async (accessToken) => {
+  const fetchSpotifyProfile = async (accessToken, { strict = false } = {}) => {
     try {
       const response = await fetch(`${SPOTIFY_API}/me`, {
         headers: { Authorization: `Bearer ${accessToken}` }
@@ -186,14 +186,29 @@ const createDashboardServer = (client) => {
       }
 
       if (!response.ok) {
+        const spotifyMessage = data.error?.message || data.error_description || data.error || 'Errore profilo Spotify.';
         logger.warn(
           `Spotify profile request failed: status=${response.status} body=${JSON.stringify(data).slice(0, 800)}`
         );
+
+        if (strict) {
+          if (response.status === 401) {
+            throw new Error(`${spotifyMessage} Riprova il collegamento Spotify.`);
+          }
+          if (response.status === 403) {
+            throw new Error(
+              `${spotifyMessage} L'utente non e autorizzato in Spotify Developer (Users and Access), oppure l'app non e in Extended quota mode.`
+            );
+          }
+          throw new Error(spotifyMessage);
+        }
+
         return null;
       }
 
       return data;
     } catch (error) {
+      if (strict) throw error;
       logger.warn(`Spotify profile request failed: ${error.message || error}`);
       return null;
     }
@@ -541,12 +556,16 @@ const createDashboardServer = (client) => {
         redirect_uri: config.spotify.redirectUri
       });
 
-      const profile = await fetchSpotifyProfile(token.access_token);
+      const profile = await fetchSpotifyProfile(token.access_token, { strict: true });
+      if (!profile?.id) {
+        throw new Error('Profilo Spotify non disponibile. Riprova il collegamento.');
+      }
+
       const account = {
-        spotifyUserId: profile?.id || null,
-        displayName: profile?.display_name || profile?.id || 'Spotify collegato',
-        country: profile?.country || null,
-        avatarUrl: profile?.images?.[0]?.url || null,
+        spotifyUserId: profile.id,
+        displayName: profile.display_name || profile.id,
+        country: profile.country || null,
+        avatarUrl: profile.images?.[0]?.url || null,
         accessToken: token.access_token,
         refreshToken: token.refresh_token || null,
         tokenType: token.token_type || 'Bearer',
@@ -611,6 +630,15 @@ const createDashboardServer = (client) => {
             avatarUrl: profile.images?.[0]?.url || null
           };
           await saveSpotifyAccount(req.session.user.id, account);
+        } else {
+          res.json({
+            connected: false,
+            profile: null,
+            error:
+              'Collegamento Spotify incompleto. Apri "Ricollega" e autorizza di nuovo il tuo account (controlla Users and Access su Spotify Developer).',
+            relinkRequired: true
+          });
+          return;
         }
       }
 
