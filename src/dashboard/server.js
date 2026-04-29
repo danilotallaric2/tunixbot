@@ -5,9 +5,12 @@ const session = require('express-session');
 const config = require('../config');
 const logger = require('../utils/logger');
 const { formatDuration } = require('../utils/time');
+const SpotifyUserStore = require('./spotifyUserStore');
 
 const DISCORD_API = 'https://discord.com/api/v10';
 const LRCLIB_API = 'https://lrclib.net/api/get';
+const SPOTIFY_ACCOUNTS_API = 'https://accounts.spotify.com';
+const SPOTIFY_API = 'https://api.spotify.com/v1';
 
 const parseLoopMode = (value) => {
   if (!value) return null;
@@ -81,6 +84,8 @@ const buildStateFromQueue = (client, queue) => {
 
 const createDashboardServer = (client) => {
   const app = express();
+  const spotifyStore = new SpotifyUserStore(path.join(__dirname, '..', 'data', 'spotify-users.json'));
+  const spotifyEnabled = Boolean(config.spotify.clientId && config.spotify.clientSecret && config.spotify.redirectUri);
   app.use(express.json({ limit: '1mb' }));
   app.use(
     session({
@@ -102,6 +107,98 @@ const createDashboardServer = (client) => {
       return;
     }
     next();
+  };
+
+  const requireSpotifyEnabled = (res) => {
+    if (spotifyEnabled) return true;
+    res.status(500).json({ error: 'Spotify OAuth non configurato. Imposta SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET e SPOTIFY_REDIRECT_URI.' });
+    return false;
+  };
+
+  const spotifyBasicAuth = () =>
+    Buffer.from(`${config.spotify.clientId}:${config.spotify.clientSecret}`).toString('base64');
+
+  const buildSpotifyState = () => crypto.randomBytes(24).toString('hex');
+
+  const saveSpotifyAccount = async (discordUserId, account) => {
+    await spotifyStore.set(discordUserId, {
+      ...account,
+      updatedAt: Date.now()
+    });
+  };
+
+  const fetchSpotifyToken = async (bodyParams) => {
+    const body = new URLSearchParams(bodyParams);
+    const response = await fetch(`${SPOTIFY_ACCOUNTS_API}/api/token`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Authorization: `Basic ${spotifyBasicAuth()}`
+      },
+      body
+    });
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error_description || data.error || 'Token Spotify non valido.');
+    }
+    return data;
+  };
+
+  const fetchSpotifyProfile = async (accessToken) => {
+    const response = await fetch(`${SPOTIFY_API}/me`, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error?.message || 'Impossibile leggere profilo Spotify.');
+    }
+    return data;
+  };
+
+  const ensureSpotifyAccessToken = async (discordUserId) => {
+    const account = spotifyStore.get(discordUserId);
+    if (!account) throw new Error('Nessun account Spotify collegato.');
+
+    const expiresAt = Number(account.expiresAt || 0);
+    const now = Date.now();
+    if (account.accessToken && expiresAt > now + 20_000) return account;
+    if (!account.refreshToken) throw new Error('Sessione Spotify scaduta. Ricollega il tuo account.');
+
+    const refreshed = await fetchSpotifyToken({
+      grant_type: 'refresh_token',
+      refresh_token: account.refreshToken
+    });
+
+    const next = {
+      ...account,
+      accessToken: refreshed.access_token,
+      refreshToken: refreshed.refresh_token || account.refreshToken,
+      tokenType: refreshed.token_type || 'Bearer',
+      scope: refreshed.scope || account.scope || '',
+      expiresAt: Date.now() + Number(refreshed.expires_in || 3600) * 1000
+    };
+
+    await saveSpotifyAccount(discordUserId, next);
+    return next;
+  };
+
+  const spotifyRequest = async (discordUserId, endpoint, query = {}) => {
+    const account = await ensureSpotifyAccessToken(discordUserId);
+    const url = new URL(`${SPOTIFY_API}${endpoint}`);
+    for (const [k, v] of Object.entries(query)) {
+      if (v === undefined || v === null || v === '') continue;
+      url.searchParams.set(k, String(v));
+    }
+
+    const response = await fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${account.accessToken}` }
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error?.message || 'Errore richiesta Spotify.');
+    }
+    return data;
   };
 
   const fetchDiscordToken = async (code) => {
@@ -318,6 +415,73 @@ const createDashboardServer = (client) => {
     }
   });
 
+  app.get('/auth/spotify/login', requireAuth, (req, res) => {
+    if (!requireSpotifyEnabled(res)) return;
+
+    const state = buildSpotifyState();
+    req.session.spotifyOAuthState = state;
+
+    const params = new URLSearchParams({
+      response_type: 'code',
+      client_id: config.spotify.clientId,
+      scope: config.spotify.scopes.join(' '),
+      redirect_uri: config.spotify.redirectUri,
+      state,
+      show_dialog: 'false'
+    });
+
+    res.redirect(`${SPOTIFY_ACCOUNTS_API}/authorize?${params.toString()}`);
+  });
+
+  app.get('/auth/spotify/callback', requireAuth, async (req, res) => {
+    if (!requireSpotifyEnabled(res)) return;
+
+    try {
+      const code = String(req.query.code || '');
+      const state = String(req.query.state || '');
+      if (!code || !state) throw new Error('Callback Spotify incompleto.');
+      if (req.session.spotifyOAuthState !== state) throw new Error('State Spotify non valido.');
+
+      const token = await fetchSpotifyToken({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: config.spotify.redirectUri
+      });
+
+      const profile = await fetchSpotifyProfile(token.access_token);
+      const account = {
+        spotifyUserId: profile.id,
+        displayName: profile.display_name || profile.id,
+        country: profile.country || null,
+        avatarUrl: profile.images?.[0]?.url || null,
+        accessToken: token.access_token,
+        refreshToken: token.refresh_token || null,
+        tokenType: token.token_type || 'Bearer',
+        scope: token.scope || '',
+        expiresAt: Date.now() + Number(token.expires_in || 3600) * 1000,
+        linkedAt: Date.now()
+      };
+
+      await saveSpotifyAccount(req.session.user.id, account);
+      delete req.session.spotifyOAuthState;
+      req.session.spotifyLinked = true;
+      res.redirect('/');
+    } catch (error) {
+      logger.error('Spotify OAuth callback failed', error);
+      res.status(500).send(`Collegamento Spotify fallito: ${error.message}`);
+    }
+  });
+
+  app.post('/auth/spotify/logout', requireAuth, async (req, res) => {
+    try {
+      await spotifyStore.remove(req.session.user.id);
+      req.session.spotifyLinked = false;
+      res.json({ ok: true });
+    } catch (error) {
+      res.status(500).json({ error: error.message || 'Errore disconnessione Spotify' });
+    }
+  });
+
   app.post('/auth/logout', (req, res) => {
     req.session.destroy(() => {
       res.json({ ok: true });
@@ -331,6 +495,98 @@ const createDashboardServer = (client) => {
     }
 
     res.json({ authenticated: true, user: req.session.user });
+  });
+
+  app.get('/api/spotify/status', requireAuth, async (req, res) => {
+    if (!requireSpotifyEnabled(res)) return;
+    try {
+      const saved = spotifyStore.get(req.session.user.id);
+      if (!saved) {
+        res.json({ connected: false, profile: null });
+        return;
+      }
+
+      const account = await ensureSpotifyAccessToken(req.session.user.id);
+      res.json({
+        connected: true,
+        profile: {
+          spotifyUserId: account.spotifyUserId,
+          displayName: account.displayName,
+          avatarUrl: account.avatarUrl,
+          country: account.country
+        }
+      });
+    } catch (error) {
+      res.status(401).json({ connected: false, error: error.message || 'Spotify non collegato' });
+    }
+  });
+
+  app.get('/api/spotify/library', requireAuth, async (req, res) => {
+    if (!requireSpotifyEnabled(res)) return;
+
+    const type = String(req.query.type || 'playlists');
+    const limit = Math.max(1, Math.min(50, Number.parseInt(String(req.query.limit || '20'), 10) || 20));
+    const offset = Math.max(0, Number.parseInt(String(req.query.offset || '0'), 10) || 0);
+
+    try {
+      if (type === 'playlists') {
+        const data = await spotifyRequest(req.session.user.id, '/me/playlists', { limit, offset });
+        const items = (data.items || []).map((p) => ({
+          id: p.id,
+          name: p.name,
+          description: p.description || '',
+          owner: p.owner?.display_name || p.owner?.id || 'Unknown',
+          tracksCount: p.tracks?.total || 0,
+          image: p.images?.[0]?.url || null,
+          uri: p.uri || null,
+          url: p.external_urls?.spotify || (p.id ? `https://open.spotify.com/playlist/${p.id}` : null),
+          type: 'playlist'
+        }));
+        res.json({
+          type,
+          items,
+          total: Number(data.total || items.length),
+          limit: Number(data.limit || limit),
+          offset: Number(data.offset || offset)
+        });
+        return;
+      }
+
+      if (type === 'liked') {
+        const data = await spotifyRequest(req.session.user.id, '/me/tracks', {
+          market: config.spotify.market,
+          limit,
+          offset
+        });
+        const items = (data.items || [])
+          .map((entry) => entry.track)
+          .filter(Boolean)
+          .map((t) => ({
+            id: t.id,
+            name: t.name,
+            artists: (t.artists || []).map((a) => a.name).join(', '),
+            album: t.album?.name || '',
+            durationMs: t.duration_ms || 0,
+            image: t.album?.images?.[0]?.url || null,
+            uri: t.uri || null,
+            url: t.external_urls?.spotify || (t.id ? `https://open.spotify.com/track/${t.id}` : null),
+            type: 'track'
+          }));
+
+        res.json({
+          type,
+          items,
+          total: Number(data.total || items.length),
+          limit: Number(data.limit || limit),
+          offset: Number(data.offset || offset)
+        });
+        return;
+      }
+
+      res.status(400).json({ error: 'Tipo libreria non supportato. Usa playlists o liked.' });
+    } catch (error) {
+      res.status(500).json({ error: error.message || 'Errore libreria Spotify' });
+    }
   });
 
   app.get('/api/session', requireAuth, async (req, res) => {

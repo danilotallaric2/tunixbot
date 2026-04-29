@@ -295,6 +295,87 @@ input, select {
   background: linear-gradient(120deg, #a8efff, var(--cyan));
 }
 
+.spotify-user-panel {
+  margin-top: 10px;
+  padding: 8px;
+  border-radius: 12px;
+  border: 1px solid #2f527f;
+  background: #0d1f3a;
+}
+
+.spotify-user-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.spotify-user-head h3 {
+  margin: 0;
+  margin-right: auto;
+}
+
+.spotify-user-label {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.spotify-tabs {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.spotify-library-list {
+  margin-top: 8px;
+  max-height: 280px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.spotify-lib-item {
+  display: grid;
+  grid-template-columns: 42px 1fr;
+  gap: 8px;
+  border: 1px solid #284a77;
+  background: #0e213e;
+  border-radius: 10px;
+  padding: 6px;
+}
+
+.spotify-lib-item img {
+  width: 42px;
+  height: 42px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #112743;
+}
+
+.spotify-lib-title {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.spotify-lib-sub {
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.spotify-lib-actions {
+  margin-top: 6px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.spotify-lib-actions .queue-action-btn {
+  font-size: 10px;
+}
+
 .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .chip {
   border: 1px solid #3f5f92;
