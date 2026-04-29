@@ -20,6 +20,7 @@ class GuildQueue {
     this.currentStarted = false;
     this.trackStartTimeout = null;
     this.nowPlayingUpdateTimer = null;
+    this.recentTrackKeys = [];
     this.joinedByUserId = null;
     this.joinedAt = 0;
 

@@ -182,6 +182,64 @@ class MusicManager {
       .trim();
   }
 
+  buildTrackKey(track) {
+    const title = this.normalizeCompareText(this.cleanSpotifyTitle(track?.title || ''));
+    const artist = this.normalizeCompareText(String(track?.author || '').split(',')[0].trim());
+    if (!title) return '';
+    return `${title}::${artist}`;
+  }
+
+  rememberFinishedTrack(queue, track) {
+    if (!queue || !track) return;
+    const key = this.buildTrackKey(track);
+    if (!key) return;
+
+    queue.recentTrackKeys = Array.isArray(queue.recentTrackKeys) ? queue.recentTrackKeys : [];
+    queue.recentTrackKeys.push(key);
+    if (queue.recentTrackKeys.length > 40) {
+      queue.recentTrackKeys.splice(0, queue.recentTrackKeys.length - 40);
+    }
+  }
+
+  extractSpotifyTrackId(urlOrUri) {
+    const parsed = SpotifyService.parseSpotifyUrl(urlOrUri);
+    if (!parsed || parsed.type !== 'track') return null;
+    return parsed.id;
+  }
+
+  async findSpotifySeedTrackId(seedTrack) {
+    if (!this.spotify.enabled || !this.spotify.api || !seedTrack) return null;
+
+    const directId = this.extractSpotifyTrackId(seedTrack.url);
+    if (directId) return directId;
+
+    const cleanTitle = this.cleanSpotifyTitle(seedTrack.title || '');
+    const primaryArtist = String(seedTrack.author || '').split(',')[0].trim();
+    const query = [cleanTitle, primaryArtist].filter(Boolean).join(' ').trim();
+    if (!query) return null;
+
+    try {
+      const result = await this.spotify.api.searchTracks(query, {
+        market: config.spotify.market,
+        limit: 5
+      });
+      const items = result.body?.tracks?.items || [];
+      if (!items.length) return null;
+
+      const seedKey = this.buildTrackKey(seedTrack);
+      for (const item of items) {
+        const mapped = this.spotify.mapTrack(item);
+        if (this.buildTrackKey(mapped) === seedKey) {
+          return item.id || null;
+        }
+      }
+      return items[0].id || null;
+    } catch (error) {
+      logger.warn(`Spotify seed lookup failed: ${error.message || error}`);
+      return null;
+    }
+  }
+
   buildSpotifySearchQueries(spotifyTrack) {
     const primaryArtist = String(spotifyTrack.author || '').split(',')[0].trim();
     const cleanTitle = this.cleanSpotifyTitle(spotifyTrack.title);
@@ -347,81 +405,107 @@ class MusicManager {
     });
   }
 
-  buildAutoplayQueries(seedTrack) {
-    const primaryArtist = String(seedTrack?.author || '')
-      .split(',')[0]
-      .trim();
-    const cleanTitle = this.cleanSpotifyTitle(seedTrack?.title || '');
+  collectAutoplayExcludeKeys(queue, seedTrack) {
+    const excluded = new Set();
 
-    const queries = [
-      `ytmsearch:${primaryArtist} mix`,
-      `ytsearch:${primaryArtist} mix`,
-      `ytmsearch:${primaryArtist} radio`,
-      `ytsearch:${primaryArtist} official audio`,
-      `ytmsearch:${cleanTitle} ${primaryArtist}`,
-      `ytsearch:${cleanTitle} ${primaryArtist}`
-    ];
+    const push = (track) => {
+      const key = this.buildTrackKey(track);
+      if (key) excluded.add(key);
+    };
 
-    const unique = [];
-    const seen = new Set();
-    for (const q of queries) {
-      const key = this.normalizeCompareText(q);
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      unique.push(q);
+    push(seedTrack);
+    push(queue.current);
+    for (const queued of queue.tracks) push(queued);
+    for (const key of queue.recentTrackKeys || []) {
+      if (key) excluded.add(key);
     }
-    return unique;
+
+    return excluded;
   }
 
-  async resolveAutoplayTrack(node, seedTrack, requestedBy) {
-    const queries = this.buildAutoplayQueries(seedTrack);
-    if (!queries.length) return null;
+  async fetchSpotifyAutoplayCandidates(seedTrack, limit = 25) {
+    if (!this.spotify.enabled || !this.spotify.api) return [];
 
-    const sameTitle = this.normalizeCompareText(this.cleanSpotifyTitle(seedTrack?.title || ''));
-    const sameArtist = this.normalizeCompareText(String(seedTrack?.author || '').split(',')[0].trim());
-    const rawCandidates = [];
-    const seenSignatures = new Set();
+    const seedTrackId = await this.findSpotifySeedTrackId(seedTrack);
+    const collected = [];
+    const seenUrls = new Set();
 
-    for (const query of queries) {
-      const result = await this.searchLavalink(node, query);
-      for (const raw of result.tracks.slice(0, 12)) {
-        const info = raw?.info || {};
-        const signature = this.buildFallbackSignature(raw);
-        if (!signature || seenSignatures.has(signature)) continue;
-        seenSignatures.add(signature);
+    const pushSpotifyTrack = (rawTrack) => {
+      if (!rawTrack) return;
+      const mapped = this.spotify.mapTrack(rawTrack);
+      const url = mapped.url || '';
+      if (url && seenUrls.has(url)) return;
+      if (url) seenUrls.add(url);
+      collected.push(mapped);
+    };
 
-        const candidateTitle = this.normalizeCompareText(this.cleanSpotifyTitle(info.title || ''));
-        const candidateAuthor = this.normalizeCompareText(String(info.author || ''));
-        const candidateDuration = Number(info.length || 0);
-
-        if (!candidateTitle) continue;
-        if (candidateDuration > 0 && candidateDuration < 45000) continue;
-        if (sameTitle && candidateTitle === sameTitle) continue;
-        if (sameTitle && sameArtist && candidateTitle === sameTitle && candidateAuthor.includes(sameArtist)) continue;
-
-        rawCandidates.push(raw);
+    if (seedTrackId) {
+      try {
+        const recommendations = await this.spotify.api.getRecommendations({
+          market: config.spotify.market,
+          seed_tracks: [seedTrackId],
+          limit
+        });
+        for (const track of recommendations.body?.tracks || []) pushSpotifyTrack(track);
+      } catch (error) {
+        logger.warn(`Spotify recommendations failed: ${error.message || error}`);
       }
     }
 
-    if (!rawCandidates.length) return null;
+    if (collected.length >= 8) return collected;
 
-    const scored = rawCandidates
-      .map((raw) => ({
-        raw,
-        score: this.scoreSpotifyCandidate(raw, {
-          title: seedTrack?.title || '',
-          author: seedTrack?.author || '',
-          duration: Number(seedTrack?.duration || 0)
-        })
-      }))
-      .sort((a, b) => b.score - a.score);
+    const primaryArtist = String(seedTrack?.author || '').split(',')[0].trim();
+    const cleanTitle = this.cleanSpotifyTitle(seedTrack?.title || '');
+    const queries = [
+      [primaryArtist, 'best hits'].filter(Boolean).join(' '),
+      [cleanTitle, primaryArtist].filter(Boolean).join(' '),
+      primaryArtist
+    ].filter(Boolean);
 
-    const preferred = scored.filter((entry) => entry.score >= 28);
-    const bucket = (preferred.length ? preferred : scored).slice(0, 10);
-    if (!bucket.length) return null;
+    for (const query of queries) {
+      if (collected.length >= limit) break;
+      try {
+        const result = await this.spotify.api.searchTracks(query, {
+          market: config.spotify.market,
+          limit: Math.min(15, limit)
+        });
+        for (const track of result.body?.tracks?.items || []) pushSpotifyTrack(track);
+      } catch (error) {
+        logger.warn(`Spotify fallback search failed (${query}): ${error.message || error}`);
+      }
+    }
 
-    const picked = bucket[Math.floor(Math.random() * bucket.length)].raw;
-    return this.buildTrack(picked, requestedBy || seedTrack?.requestedBy || this.client.user?.id || null);
+    return collected;
+  }
+
+  async resolveAutoplayTrack(node, seedTrack, requestedBy, queue) {
+    const excludedKeys = this.collectAutoplayExcludeKeys(queue, seedTrack);
+    const spotifyCandidates = await this.fetchSpotifyAutoplayCandidates(seedTrack, 30);
+    if (!spotifyCandidates.length) return null;
+
+    const filtered = spotifyCandidates.filter((track) => {
+      const key = this.buildTrackKey(track);
+      return key && !excludedKeys.has(key);
+    });
+    if (!filtered.length) return null;
+
+    const shuffled = filtered
+      .map((track) => ({ track, sort: Math.random() }))
+      .sort((a, b) => a.sort - b.sort)
+      .map((entry) => entry.track);
+
+    const maxAttempts = Math.min(14, shuffled.length);
+    for (let i = 0; i < maxAttempts; i += 1) {
+      const candidate = shuffled[i];
+      const resolved = await this.resolveSingleSpotifyTrack(node, candidate, requestedBy);
+      if (!resolved) continue;
+
+      const resolvedKey = this.buildTrackKey(resolved);
+      if (!resolvedKey || excludedKeys.has(resolvedKey)) continue;
+      return resolved;
+    }
+
+    return null;
   }
 
   async tryAutoplayWhenQueueEnds(queue, seedTrack) {
@@ -435,7 +519,7 @@ class MusicManager {
 
     let autoTrack = null;
     try {
-      autoTrack = await this.resolveAutoplayTrack(node, seedTrack, seedTrack.requestedBy);
+      autoTrack = await this.resolveAutoplayTrack(node, seedTrack, seedTrack.requestedBy, queue);
     } catch (error) {
       logger.warn(`Autoplay related lookup failed for guild ${queue.guildId}: ${error.message || error}`);
       return false;
@@ -447,7 +531,7 @@ class MusicManager {
     await this.safeTextSend(queue.textChannelId, {
       embeds: [
         baseEmbed('Autoplay Attivo', config.theme.secondary).setDescription(
-          `Coda finita. Continuo con un brano simile:\n**${autoTrack.title}** - ${autoTrack.author}`
+          `Coda finita. Continuo con un brano consigliato da Spotify:\n**${autoTrack.title}** - ${autoTrack.author}`
         )
       ]
     });
@@ -710,6 +794,10 @@ class MusicManager {
       } else if (queue.loopMode === 'queue') {
         queue.tracks.push(finishedTrack);
       }
+    }
+
+    if (finishedTrack) {
+      this.rememberFinishedTrack(queue, finishedTrack);
     }
 
     queue.current = null;
