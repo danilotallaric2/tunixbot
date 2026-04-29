@@ -172,14 +172,31 @@ const createDashboardServer = (client) => {
   };
 
   const fetchSpotifyProfile = async (accessToken) => {
-    const response = await fetch(`${SPOTIFY_API}/me`, {
-      headers: { Authorization: `Bearer ${accessToken}` }
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(data.error?.message || 'Impossibile leggere profilo Spotify.');
+    try {
+      const response = await fetch(`${SPOTIFY_API}/me`, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+
+      const raw = await response.text();
+      let data = {};
+      try {
+        data = raw ? JSON.parse(raw) : {};
+      } catch {
+        data = { raw: raw.slice(0, 500) };
+      }
+
+      if (!response.ok) {
+        logger.warn(
+          `Spotify profile request failed: status=${response.status} body=${JSON.stringify(data).slice(0, 800)}`
+        );
+        return null;
+      }
+
+      return data;
+    } catch (error) {
+      logger.warn(`Spotify profile request failed: ${error.message || error}`);
+      return null;
     }
-    return data;
   };
 
   const ensureSpotifyAccessToken = async (discordUserId) => {
@@ -506,10 +523,10 @@ const createDashboardServer = (client) => {
 
       const profile = await fetchSpotifyProfile(token.access_token);
       const account = {
-        spotifyUserId: profile.id,
-        displayName: profile.display_name || profile.id,
-        country: profile.country || null,
-        avatarUrl: profile.images?.[0]?.url || null,
+        spotifyUserId: profile?.id || null,
+        displayName: profile?.display_name || profile?.id || 'Spotify collegato',
+        country: profile?.country || null,
+        avatarUrl: profile?.images?.[0]?.url || null,
         accessToken: token.access_token,
         refreshToken: token.refresh_token || null,
         tokenType: token.token_type || 'Bearer',
