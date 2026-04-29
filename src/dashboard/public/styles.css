@@ -1291,9 +1291,11 @@ input[type='range']::-moz-range-thumb {
 
   .player-footer {
     height: auto;
+    max-height: min(42vh, 190px);
     grid-template-columns: 1fr;
     gap: 10px;
     padding: 10px 12px;
+    overflow-y: auto;
   }
 
   .player-left,
@@ -1383,7 +1385,14 @@ input[type='range']::-moz-range-thumb {
   }
 
   .loop-btn {
-    min-width: 70px;
+    width: 34px;
+    min-width: 34px;
+  }
+
+  .loop-state {
+    right: -10px;
+    bottom: -5px;
+    transform: scale(0.9);
   }
 
   .action-btn span {
