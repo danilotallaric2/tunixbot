@@ -17,7 +17,7 @@ const searchInput = document.getElementById('searchInput');
 const searchBtn = document.getElementById('searchBtn');
 const playBtn = document.getElementById('playBtn');
 const searchSourceSelect = document.getElementById('searchSourceSelect');
-const searchSourceBadge = document.getElementById('searchSourceBadge');
+const sourceOptionButtons = [...document.querySelectorAll('[data-source-option]')];
 const discoverSection = document.getElementById('discoverSection');
 const resultsSection = document.getElementById('resultsSection');
 
@@ -67,6 +67,7 @@ const lyricsShuffleBtn = document.getElementById('lyricsShuffleBtn');
 const lyricsLoopBtn = document.getElementById('lyricsLoopBtn');
 const effectsPanel = document.getElementById('effectsPanel');
 const effectsCloseBtn = document.getElementById('effectsCloseBtn');
+const effectButtons = [...effectsPanel.querySelectorAll('[data-effect]')];
 
 const loopModes = ['off', 'song', 'queue'];
 const ANNOUNCEMENT_VERSION = '1.0.5';
@@ -206,10 +207,33 @@ const setPlayPauseVisual = (button, paused = true) => {
 };
 
 const updateSourceBadge = () => {
-  if (!searchSourceBadge || !searchSourceSelect) return;
+  if (!searchSourceSelect) return;
   const source = searchSourceSelect.value === 'youtube' ? 'youtube' : 'spotify';
-  searchSourceBadge.classList.toggle('youtube', source === 'youtube');
-  searchSourceBadge.classList.toggle('spotify', source === 'spotify');
+
+  for (const button of sourceOptionButtons) {
+    const active = button.dataset.sourceOption === source;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', active ? 'true' : 'false');
+  }
+};
+
+const setSearchSource = (source, options = {}) => {
+  if (!searchSourceSelect) return;
+  searchSourceSelect.value = source === 'youtube' ? 'youtube' : 'spotify';
+  updateSourceBadge();
+
+  const q = searchInput.value.trim();
+  if (options.rerunSearch && q && !normalizePlayableUrl(q)) {
+    search(q);
+  }
+};
+
+const updateEffectSelection = (filter = 'clear') => {
+  for (const button of effectButtons) {
+    const active = button.dataset.effect === filter;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', active ? 'true' : 'false');
+  }
 };
 
 const setSpotifyTab = (type) => {
@@ -669,6 +693,7 @@ const renderNowPlaying = (s) => {
   updateLoopButtonLabels();
   currentEffect.textContent = s.filter || 'clear';
   lyricsCurrentEffect.textContent = s.filter || 'clear';
+  updateEffectSelection(s.filter || 'clear');
 
   renderQueue(s.queue || []);
 
@@ -843,7 +868,14 @@ searchBtn.addEventListener('click', () => search());
 searchInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') search();
 });
-searchSourceSelect?.addEventListener('change', updateSourceBadge);
+searchSourceSelect?.addEventListener('change', () => {
+  setSearchSource(searchSourceSelect.value, { rerunSearch: true });
+});
+for (const button of sourceOptionButtons) {
+  button.addEventListener('click', () => {
+    setSearchSource(button.dataset.sourceOption, { rerunSearch: true });
+  });
+}
 searchInput.addEventListener('input', () => {
   if (!searchInput.value.trim()) {
     renderResults([]);
@@ -875,6 +907,7 @@ lyricsPanel.addEventListener('click', (e) => {
 effectsBtn.addEventListener('click', () => {
   try {
     ensureCanControl();
+    updateEffectSelection(state?.filter || 'clear');
     setEffectsOpen(true);
   } catch (error) {
     setStatus(error.message, true);
@@ -886,17 +919,18 @@ effectsPanel.addEventListener('click', (e) => {
   if (e.target === effectsPanel) setEffectsOpen(false);
 });
 
-effectsPanel.querySelectorAll('[data-effect]').forEach((btn) => {
+effectButtons.forEach((btn) => {
   btn.addEventListener('click', async () => {
     const effect = btn.dataset.effect;
     try {
       ensureCanControl();
+      updateEffectSelection(effect);
       await control('filter', effect);
       currentEffect.textContent = effect;
       lyricsCurrentEffect.textContent = effect;
       setStatus(`Effetto applicato: ${effect}`);
-      setEffectsOpen(false);
     } catch (error) {
+      updateEffectSelection(state?.filter || 'clear');
       setStatus(error.message, true);
     }
   });
