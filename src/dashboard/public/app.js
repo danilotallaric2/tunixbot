@@ -776,8 +776,56 @@ const renderLyricsLines = () => {
     const el = document.createElement('div');
     el.className = 'lyric-line';
     el.dataset.index = String(idx);
-    el.textContent = line.text;
+    const base = document.createElement('span');
+    base.className = 'lyric-line-base';
+    base.textContent = line.text;
+
+    const fill = document.createElement('span');
+    fill.className = 'lyric-line-fill';
+    fill.textContent = line.text;
+
+    el.append(base, fill);
     lyricsLinesWrap.appendChild(el);
+  });
+};
+
+const getLyricLineWindow = (idx) => {
+  if (idx < 0 || idx >= lyricsLines.length) return null;
+  const start = lyricsLines[idx]?.timeMs ?? 0;
+  const nextStart = lyricsLines[idx + 1]?.timeMs;
+
+  if (Number.isFinite(nextStart) && nextStart > start) {
+    return { start, end: nextStart };
+  }
+
+  const trackDuration = Number(state?.current?.duration || 0);
+  if (trackDuration > start + 150) {
+    return { start, end: trackDuration };
+  }
+
+  return { start, end: start + 2200 };
+};
+
+const setLyricFillProgress = (idx, currentMs) => {
+  const lineEls = lyricsLinesWrap.querySelectorAll('.lyric-line');
+  if (!lineEls.length) return;
+
+  const window = getLyricLineWindow(idx);
+  let activeProgress = 0;
+  if (window) {
+    const span = Math.max(300, window.end - window.start);
+    activeProgress = Math.max(0, Math.min(1, (currentMs - window.start) / span));
+  }
+
+  lineEls.forEach((el, i) => {
+    const fillEl = el.querySelector('.lyric-line-fill');
+    if (!fillEl) return;
+
+    let widthPercent = 0;
+    if (idx >= 0 && i < idx) widthPercent = 100;
+    else if (i === idx) widthPercent = activeProgress * 100;
+
+    fillEl.style.width = `${Math.max(0, Math.min(100, widthPercent)).toFixed(2)}%`;
   });
 };
 
@@ -802,20 +850,24 @@ const updateLyricsProgress = () => {
     else break;
   }
 
-  if (idx === activeLyricIndex) return;
-  activeLyricIndex = idx;
+  const indexChanged = idx !== activeLyricIndex;
+  if (indexChanged) {
+    activeLyricIndex = idx;
 
-  const lineEls = lyricsLinesWrap.querySelectorAll('.lyric-line');
-  lineEls.forEach((el, i) => {
-    el.classList.remove('active', 'dimmed');
-    if (idx >= 0 && i < idx) el.classList.add('dimmed');
-    if (i === idx) el.classList.add('active');
-  });
+    const lineEls = lyricsLinesWrap.querySelectorAll('.lyric-line');
+    lineEls.forEach((el, i) => {
+      el.classList.remove('active', 'dimmed');
+      if (idx >= 0 && i < idx) el.classList.add('dimmed');
+      if (i === idx) el.classList.add('active');
+    });
 
-  if (idx >= 0) {
-    const activeEl = lyricsLinesWrap.querySelector(`.lyric-line[data-index=\"${idx}\"]`);
-    if (activeEl) activeEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (idx >= 0) {
+      const activeEl = lyricsLinesWrap.querySelector(`.lyric-line[data-index=\"${idx}\"]`);
+      if (activeEl) activeEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
   }
+
+  setLyricFillProgress(idx, currentMs);
 };
 
 const updateLoopButtonLabels = () => {
@@ -896,7 +948,7 @@ const renderQueue = (queue) => {
     return;
   }
 
-  for (const [idx, track] of queue.slice(0, 18).entries()) {
+  for (const [idx, track] of queue.slice(0, 30).entries()) {
     const item = document.createElement('div');
     item.className = 'queue-item';
     item.dataset.queueIndex = String(idx + 1);

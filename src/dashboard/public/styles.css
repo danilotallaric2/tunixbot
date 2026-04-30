@@ -1286,19 +1286,54 @@ input[type='range']::-moz-range-thumb {
 }
 
 .lyric-line {
-  color: #89a1c4;
+  position: relative;
   font-size: 2rem;
   font-weight: 700;
   line-height: 1.18;
-  transition: color 120ms ease, opacity 120ms ease;
+  transition: color 140ms ease, opacity 140ms ease;
+}
+
+.lyric-line-base,
+.lyric-line-fill {
+  display: block;
+  white-space: pre-wrap;
+}
+
+.lyric-line-base {
+  color: #7f97bc;
+}
+
+.lyric-line-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0%;
+  overflow: hidden;
+  color: #f4fbff;
+  pointer-events: none;
+  transition: width 170ms linear, color 140ms ease, opacity 140ms ease;
+  will-change: width;
 }
 
 .lyric-line.active {
-  color: #f4fbff;
+  transform: translateZ(0);
+}
+
+.lyric-line.active .lyric-line-base {
+  color: #9db4d5;
 }
 
 .lyric-line.dimmed {
-  color: #667a9c;
+  opacity: 0.82;
+}
+
+.lyric-line.dimmed .lyric-line-base {
+  color: #5f7291;
+}
+
+.lyric-line.dimmed .lyric-line-fill {
+  color: #7f93b1;
+  opacity: 0.55;
 }
 
 .lyrics-player {
