@@ -84,6 +84,10 @@ const LYRICS_SYNC_DELAY_MS = -1000;
 const SERVER_PROGRESS_BACKWARD_TOLERANCE_MS = 350;
 const SERVER_PROGRESS_HARD_RESET_BACKWARD_MS = 3500;
 const SERVER_PROGRESS_MAX_SOFT_BACKSTEP_MS = 120;
+const lyricGraphemeSegmenter =
+  typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function'
+    ? new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+    : null;
 let sessionInfo = null;
 let state = null;
 let canControl = false;
@@ -807,6 +811,62 @@ const prefetchLyricsForCurrentTrack = () => {
   fetchLyricsForTrackKey(trackKey).catch(() => {});
 };
 
+const splitLyricGraphemes = (text) => {
+  const input = String(text || '');
+  if (!input) return [];
+  if (lyricGraphemeSegmenter) {
+    return [...lyricGraphemeSegmenter.segment(input)].map((part) => part.segment);
+  }
+  return Array.from(input);
+};
+
+const getLyricLineGraphemes = (idx) => {
+  const line = lyricsLines[idx];
+  if (!line) return [];
+  if (!Array.isArray(line.graphemes)) {
+    line.graphemes = splitLyricGraphemes(line.text);
+  }
+  return line.graphemes;
+};
+
+const resetLyricLineMarkup = (lineEl, lineIdx) => {
+  if (!lineEl) return;
+  if (lineEl.dataset.progressChars === '-1') return;
+  lineEl.dataset.progressChars = '-1';
+  lineEl.textContent = lyricsLines[lineIdx]?.text || '';
+};
+
+const setLyricLineMarkup = (lineEl, lineIdx, doneChars) => {
+  if (!lineEl) return;
+  const graphemes = getLyricLineGraphemes(lineIdx);
+  if (!graphemes.length) {
+    lineEl.dataset.progressChars = '-1';
+    lineEl.textContent = lyricsLines[lineIdx]?.text || '';
+    return;
+  }
+
+  const clamped = Math.max(0, Math.min(graphemes.length, doneChars));
+  if (Number(lineEl.dataset.progressChars || -1) === clamped) return;
+  lineEl.dataset.progressChars = String(clamped);
+
+  const doneText = graphemes.slice(0, clamped).join('');
+  const restText = graphemes.slice(clamped).join('');
+
+  lineEl.textContent = '';
+  if (doneText) {
+    const doneEl = document.createElement('span');
+    doneEl.className = 'lyric-progress-done';
+    doneEl.textContent = doneText;
+    lineEl.appendChild(doneEl);
+  }
+  if (restText) {
+    const restEl = document.createElement('span');
+    restEl.className = 'lyric-progress-rest';
+    restEl.textContent = restText;
+    lineEl.appendChild(restEl);
+  }
+};
+
 const renderLyricsLines = () => {
   lyricsLinesWrap.innerHTML = '';
 
@@ -819,8 +879,8 @@ const renderLyricsLines = () => {
     const el = document.createElement('div');
     el.className = 'lyric-line';
     el.dataset.index = String(idx);
+    el.dataset.progressChars = '-1';
     el.textContent = line.text;
-    el.style.setProperty('--fill', '0%');
     lyricsLinesWrap.appendChild(el);
   });
 };
@@ -854,11 +914,13 @@ const setLyricFillProgress = (idx, currentMs) => {
   }
 
   lineEls.forEach((el, i) => {
-    let widthPercent = 0;
-    if (idx >= 0 && i < idx) widthPercent = 100;
-    else if (i === idx) widthPercent = activeProgress * 100;
-
-    el.style.setProperty('--fill', `${Math.max(0, Math.min(100, widthPercent)).toFixed(2)}%`);
+    if (idx >= 0 && i === idx) {
+      const graphemes = getLyricLineGraphemes(i);
+      const doneChars = Math.floor(activeProgress * graphemes.length);
+      setLyricLineMarkup(el, i, doneChars);
+    } else {
+      resetLyricLineMarkup(el, i);
+    }
   });
 };
 

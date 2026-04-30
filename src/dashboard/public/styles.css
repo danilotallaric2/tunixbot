@@ -1286,21 +1286,12 @@ input[type='range']::-moz-range-thumb {
 }
 
 .lyric-line {
-  --fill: 0%;
   font-size: 2rem;
   font-weight: 700;
   line-height: 1.18;
   color: #7f97bc;
-  background-image: linear-gradient(
-    90deg,
-    #f4fbff 0%,
-    #f4fbff var(--fill),
-    #7f97bc var(--fill),
-    #7f97bc 100%
-  );
-  background-clip: text;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  white-space: pre-wrap;
+  word-break: break-word;
   transition: color 140ms ease, opacity 140ms ease;
 }
 
@@ -1310,25 +1301,24 @@ input[type='range']::-moz-range-thumb {
 
 .lyric-line.active {
   color: #9db4d5;
-  background-image: linear-gradient(
-    90deg,
-    #f9fdff 0%,
-    #f9fdff var(--fill),
-    #9db4d5 var(--fill),
-    #9db4d5 100%
-  );
 }
 
 .lyric-line.dimmed {
   opacity: 0.82;
   color: #5f7291;
-  background-image: linear-gradient(
-    90deg,
-    #8ea3c0 0%,
-    #8ea3c0 var(--fill),
-    #5f7291 var(--fill),
-    #5f7291 100%
-  );
+}
+
+.lyric-progress-done {
+  color: #f9fdff;
+}
+
+.lyric-progress-rest {
+  color: #9db4d5;
+}
+
+.lyric-line.dimmed .lyric-progress-done,
+.lyric-line.dimmed .lyric-progress-rest {
+  color: inherit;
 }
 
 .lyrics-player {
