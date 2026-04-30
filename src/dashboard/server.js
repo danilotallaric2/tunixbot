@@ -11,6 +11,9 @@ const { normalizeLocale, t, localizeErrorMessage } = require('../utils/i18n');
 
 const DISCORD_API = 'https://discord.com/api/v10';
 const LRCLIB_API = 'https://lrclib.net/api/get';
+const LYRICS_CACHE_MAX_ENTRIES = 500;
+const LYRICS_CACHE_SUCCESS_TTL_MS = 1000 * 60 * 60 * 12;
+const LYRICS_CACHE_NOT_FOUND_TTL_MS = 1000 * 60 * 10;
 
 const parseLoopMode = (value) => {
   if (!value) return null;
@@ -29,6 +32,22 @@ const getRequestLocale = (req) => normalizeLocale(req?.session?.user?.locale || 
 const tr = (req, key, vars = {}) => t(getRequestLocale(req), key, vars);
 const formatApiError = (req, error, fallbackKey = 'errors.apiGeneric') =>
   localizeErrorMessage(getRequestLocale(req), error, fallbackKey);
+
+const normalizeLyricsKeyPart = (value) =>
+  String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const buildLyricsCacheKey = (track) => {
+  const title = normalizeLyricsKeyPart(track?.title || '');
+  const artist = normalizeLyricsKeyPart(String(track?.author || '').split(',')[0].trim());
+  const durationSec = Number(track?.duration) > 0 ? Math.round(Number(track.duration) / 1000) : 0;
+  return `${title}::${artist}::${durationSec}`;
+};
 
 const getSessionSecret = () => {
   if (process.env.DASHBOARD_SESSION_SECRET) return process.env.DASHBOARD_SESSION_SECRET;
@@ -281,7 +300,35 @@ const createDashboardServer = (client) => {
     };
   };
 
-  const fetchSyncedLyrics = async (track, locale = 'en') => {
+  const lyricsCache = new Map();
+  const lyricsInflight = new Map();
+
+  const readLyricsCache = (trackKey) => {
+    const entry = lyricsCache.get(trackKey);
+    if (!entry) return null;
+    if (entry.expiresAt <= Date.now()) {
+      lyricsCache.delete(trackKey);
+      return null;
+    }
+    return entry;
+  };
+
+  const writeLyricsCache = (trackKey, value, ttlMs) => {
+    if (!trackKey) return;
+    if (lyricsCache.has(trackKey)) lyricsCache.delete(trackKey);
+    lyricsCache.set(trackKey, {
+      value,
+      expiresAt: Date.now() + Math.max(1000, Number(ttlMs) || 1000)
+    });
+
+    while (lyricsCache.size > LYRICS_CACHE_MAX_ENTRIES) {
+      const oldest = lyricsCache.keys().next().value;
+      if (!oldest) break;
+      lyricsCache.delete(oldest);
+    }
+  };
+
+  const fetchLyricsFromProvider = async (track) => {
     const url = new URL(LRCLIB_API);
     url.searchParams.set('track_name', track.title || '');
     url.searchParams.set('artist_name', (track.author || '').split(',')[0].trim());
@@ -294,7 +341,7 @@ const createDashboardServer = (client) => {
     });
 
     if (!response.ok) {
-      throw new Error(t(locale, 'dashboard.lyricsNotFound'));
+      return null;
     }
 
     const data = await response.json();
@@ -302,6 +349,50 @@ const createDashboardServer = (client) => {
       syncedLyrics: data.syncedLyrics || data.synced_lyrics || null,
       plainLyrics: data.plainLyrics || data.plain_lyrics || null
     };
+  };
+
+  const fetchSyncedLyrics = async (track, locale = 'en') => {
+    const trackKey = buildLyricsCacheKey(track);
+    const cached = readLyricsCache(trackKey);
+    if (cached) {
+      if (cached.value?.notFound) throw new Error(t(locale, 'dashboard.lyricsNotFound'));
+      return cached.value;
+    }
+
+    if (trackKey && lyricsInflight.has(trackKey)) {
+      const inflightResult = await lyricsInflight.get(trackKey);
+      if (inflightResult?.notFound) throw new Error(t(locale, 'dashboard.lyricsNotFound'));
+      return inflightResult;
+    }
+
+    const request = (async () => {
+      const result = await fetchLyricsFromProvider(track);
+      if (!result || (!result.syncedLyrics && !result.plainLyrics)) {
+        const value = { notFound: true, syncedLyrics: null, plainLyrics: null };
+        writeLyricsCache(trackKey, value, LYRICS_CACHE_NOT_FOUND_TTL_MS);
+        return value;
+      }
+
+      writeLyricsCache(trackKey, result, LYRICS_CACHE_SUCCESS_TTL_MS);
+      return result;
+    })().finally(() => {
+      lyricsInflight.delete(trackKey);
+    });
+
+    if (trackKey) lyricsInflight.set(trackKey, request);
+    const finalResult = await request;
+
+    if (finalResult?.notFound) throw new Error(t(locale, 'dashboard.lyricsNotFound'));
+    return finalResult;
+  };
+
+  client.prefetchDashboardLyrics = async (track) => {
+    try {
+      if (!track) return;
+      await fetchSyncedLyrics(track, 'en');
+    } catch (error) {
+      logger.debug?.(`Lyrics prefetch skipped: ${error?.message || error}`);
+    }
   };
 
   app.get('/auth/discord/login', (req, res) => {

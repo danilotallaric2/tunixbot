@@ -792,6 +792,14 @@ class MusicManager {
       queue.clearTrackStartTimeout();
       this.resetPositionClock(queue, 0);
       queue.paused = false;
+
+      // Prefetch synced lyrics server-side as soon as playback starts,
+      // so dashboard /api/lyrics is usually hot from cache.
+      const prefetchLyrics = this.client?.prefetchDashboardLyrics;
+      if (typeof prefetchLyrics === 'function' && queue.current) {
+        Promise.resolve(prefetchLyrics(queue.current)).catch(() => {});
+      }
+
       await this.postNowPlaying(queue);
     });
 
