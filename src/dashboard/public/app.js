@@ -98,6 +98,9 @@ let lyricsTrackKey = null;
 let activeLyricIndex = -1;
 let lyricsRequestSeq = 0;
 let currentLocale = 'en';
+const lyricsCache = new Map();
+const lyricsInflight = new Map();
+const LYRICS_CACHE_MAX_ENTRIES = 80;
 
 const I18N = {
   en: {
@@ -764,6 +767,46 @@ const parseSyncedLyrics = (raw) => {
   return parsed.sort((a, b) => a.timeMs - b.timeMs);
 };
 
+const cacheLyricsLines = (trackKey, lines) => {
+  if (!trackKey) return;
+  const cachedLines = Array.isArray(lines) ? lines : [];
+  if (lyricsCache.has(trackKey)) lyricsCache.delete(trackKey);
+  lyricsCache.set(trackKey, cachedLines);
+
+  while (lyricsCache.size > LYRICS_CACHE_MAX_ENTRIES) {
+    const oldest = lyricsCache.keys().next().value;
+    if (!oldest) break;
+    lyricsCache.delete(oldest);
+  }
+};
+
+const fetchLyricsForTrackKey = async (trackKey) => {
+  if (!trackKey) return [];
+  if (lyricsCache.has(trackKey)) return lyricsCache.get(trackKey);
+  if (lyricsInflight.has(trackKey)) return lyricsInflight.get(trackKey);
+
+  const request = (async () => {
+    const payload = await api('/api/lyrics');
+    // Endpoint is tied to currently playing track; protect from stale responses.
+    if (getTrackKey(state) !== trackKey) return null;
+    const parsed = parseSyncedLyrics(payload.syncedLyrics || '');
+    cacheLyricsLines(trackKey, parsed);
+    return parsed;
+  })()
+    .finally(() => {
+      lyricsInflight.delete(trackKey);
+    });
+
+  lyricsInflight.set(trackKey, request);
+  return request;
+};
+
+const prefetchLyricsForCurrentTrack = () => {
+  const trackKey = getTrackKey(state);
+  if (!trackKey || lyricsCache.has(trackKey) || lyricsInflight.has(trackKey)) return;
+  fetchLyricsForTrackKey(trackKey).catch(() => {});
+};
+
 const renderLyricsLines = () => {
   lyricsLinesWrap.innerHTML = '';
 
@@ -776,15 +819,8 @@ const renderLyricsLines = () => {
     const el = document.createElement('div');
     el.className = 'lyric-line';
     el.dataset.index = String(idx);
-    const base = document.createElement('span');
-    base.className = 'lyric-line-base';
-    base.textContent = line.text;
-
-    const fill = document.createElement('span');
-    fill.className = 'lyric-line-fill';
-    fill.textContent = line.text;
-
-    el.append(base, fill);
+    el.textContent = line.text;
+    el.style.setProperty('--fill', '0%');
     lyricsLinesWrap.appendChild(el);
   });
 };
@@ -818,14 +854,11 @@ const setLyricFillProgress = (idx, currentMs) => {
   }
 
   lineEls.forEach((el, i) => {
-    const fillEl = el.querySelector('.lyric-line-fill');
-    if (!fillEl) return;
-
     let widthPercent = 0;
     if (idx >= 0 && i < idx) widthPercent = 100;
     else if (i === idx) widthPercent = activeProgress * 100;
 
-    fillEl.style.width = `${Math.max(0, Math.min(100, widthPercent)).toFixed(2)}%`;
+    el.style.setProperty('--fill', `${Math.max(0, Math.min(100, widthPercent)).toFixed(2)}%`);
   });
 };
 
@@ -901,15 +934,25 @@ const loadLyricsForCurrentTrack = async () => {
 
   const requestSeq = ++lyricsRequestSeq;
   activeLyricIndex = -1;
-  lyricsLines = [];
-  lyricsLinesWrap.innerHTML = `<div class=\"lyric-line\">${tr('status.loadingLyrics')}</div>`;
   lyricsTrackLabel.textContent = `${state.current.title} • ${state.current.author}`;
 
-  const payload = await api('/api/lyrics');
+  if (lyricsCache.has(requestTrackKey)) {
+    lyricsLines = lyricsCache.get(requestTrackKey) || [];
+    lyricsTrackKey = requestTrackKey;
+    renderLyricsLines();
+    updateLyricsProgress();
+    return;
+  }
+
+  lyricsLines = [];
+  lyricsLinesWrap.innerHTML = `<div class=\"lyric-line\">${tr('status.loadingLyrics')}</div>`;
+
+  const parsed = await fetchLyricsForTrackKey(requestTrackKey);
   if (requestSeq !== lyricsRequestSeq) return;
   if (!state?.current || getTrackKey(state) !== requestTrackKey) return;
+  if (!Array.isArray(parsed)) return;
 
-  lyricsLines = parseSyncedLyrics(payload.syncedLyrics || '');
+  lyricsLines = parsed;
   lyricsTrackKey = requestTrackKey;
   renderLyricsLines();
   updateLyricsProgress();
@@ -1063,6 +1106,7 @@ const renderNowPlaying = (s) => {
     lyricsTrackKey = null;
     activeLyricIndex = -1;
     lyricsRequestSeq += 1;
+    prefetchLyricsForCurrentTrack();
     if (lyricsOpen) {
       loadLyricsForCurrentTrack().catch(() => {
         lyricsLines = [];

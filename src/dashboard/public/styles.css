@@ -1286,54 +1286,49 @@ input[type='range']::-moz-range-thumb {
 }
 
 .lyric-line {
-  position: relative;
+  --fill: 0%;
   font-size: 2rem;
   font-weight: 700;
   line-height: 1.18;
-  transition: color 140ms ease, opacity 140ms ease;
-}
-
-.lyric-line-base,
-.lyric-line-fill {
-  display: block;
-  white-space: pre-wrap;
-}
-
-.lyric-line-base {
   color: #7f97bc;
-}
-
-.lyric-line-fill {
-  position: absolute;
-  left: 0;
-  top: 0;
-  width: 0%;
-  overflow: hidden;
-  color: #f4fbff;
-  pointer-events: none;
-  transition: width 170ms linear, color 140ms ease, opacity 140ms ease;
-  will-change: width;
+  background-image: linear-gradient(
+    90deg,
+    #f4fbff 0%,
+    #f4fbff var(--fill),
+    #7f97bc var(--fill),
+    #7f97bc 100%
+  );
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  transition: color 140ms ease, opacity 140ms ease;
 }
 
 .lyric-line.active {
   transform: translateZ(0);
 }
 
-.lyric-line.active .lyric-line-base {
+.lyric-line.active {
   color: #9db4d5;
+  background-image: linear-gradient(
+    90deg,
+    #f9fdff 0%,
+    #f9fdff var(--fill),
+    #9db4d5 var(--fill),
+    #9db4d5 100%
+  );
 }
 
 .lyric-line.dimmed {
   opacity: 0.82;
-}
-
-.lyric-line.dimmed .lyric-line-base {
   color: #5f7291;
-}
-
-.lyric-line.dimmed .lyric-line-fill {
-  color: #7f93b1;
-  opacity: 0.55;
+  background-image: linear-gradient(
+    90deg,
+    #8ea3c0 0%,
+    #8ea3c0 var(--fill),
+    #5f7291 var(--fill),
+    #5f7291 100%
+  );
 }
 
 .lyrics-player {
