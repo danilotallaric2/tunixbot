@@ -259,9 +259,82 @@ class MusicManager {
       .trim();
   }
 
+  cleanPrimaryAuthor(author) {
+    return String(author || '')
+      .split(',')[0]
+      .replace(/\s*-\s*topic$/i, '')
+      .replace(/\s*vevo$/i, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  tokenizeText(value) {
+    return new Set(
+      this.normalizeCompareText(value)
+        .split(' ')
+        .map((token) => token.trim())
+        .filter((token) => token.length >= 2)
+    );
+  }
+
+  titleHasLowQualityTag(title) {
+    const normalized = this.normalizeCompareText(title);
+    if (!normalized) return false;
+    return /(slowed|sped up|nightcore|reverb|8d|bass ?boost|mashup|karaoke|instrumental|fanmade|chipmunk)/i.test(
+      normalized
+    );
+  }
+
+  scoreAutoplaySpotifyCandidate(candidate, seedTrack) {
+    const candidateTitle = this.normalizeCompareText(this.cleanSpotifyTitle(candidate?.title || ''));
+    const seedTitle = this.normalizeCompareText(this.cleanSpotifyTitle(seedTrack?.title || ''));
+    const candidateArtist = this.normalizeCompareText(this.cleanPrimaryAuthor(candidate?.author || ''));
+    const seedArtist = this.normalizeCompareText(this.cleanPrimaryAuthor(seedTrack?.author || ''));
+
+    let score = 0;
+
+    if (candidateTitle && seedTitle && candidateTitle === seedTitle) score -= 220;
+
+    if (seedArtist && candidateArtist) {
+      if (candidateArtist === seedArtist) score += 50;
+      else if (candidateArtist.includes(seedArtist) || seedArtist.includes(candidateArtist)) score += 34;
+    }
+
+    const seedTitleTokens = this.tokenizeText(seedTitle);
+    const candidateTitleTokens = this.tokenizeText(candidateTitle);
+    if (seedTitleTokens.size && candidateTitleTokens.size) {
+      let common = 0;
+      for (const token of seedTitleTokens) {
+        if (candidateTitleTokens.has(token)) common += 1;
+      }
+      const overlap = common / Math.max(1, Math.min(seedTitleTokens.size, candidateTitleTokens.size));
+      score += Math.round(overlap * 22);
+    }
+
+    const seedDuration = Number(seedTrack?.duration || 0);
+    const candidateDuration = Number(candidate?.duration || 0);
+    if (seedDuration > 0 && candidateDuration > 0) {
+      const diff = Math.abs(candidateDuration - seedDuration);
+      if (diff <= 2500) score += 16;
+      else if (diff <= 6000) score += 12;
+      else if (diff <= 12000) score += 8;
+      else if (diff <= 22000) score += 3;
+      else if (diff > 60000) score -= 12;
+    }
+
+    if (this.titleHasLowQualityTag(candidate?.title || '')) score -= 40;
+
+    const popularity = Number(candidate?.popularity);
+    if (Number.isFinite(popularity) && popularity > 0) {
+      score += Math.round(Math.max(0, Math.min(20, (popularity - 35) / 3.25)));
+    }
+
+    return score;
+  }
+
   buildTrackKey(track) {
     const title = this.normalizeCompareText(this.cleanSpotifyTitle(track?.title || ''));
-    const artist = this.normalizeCompareText(String(track?.author || '').split(',')[0].trim());
+    const artist = this.normalizeCompareText(this.cleanPrimaryAuthor(track?.author || ''));
     if (!title) return '';
     return `${title}::${artist}`;
   }
@@ -505,13 +578,17 @@ class MusicManager {
 
     const seedTrackId = await this.findSpotifySeedTrackId(seedTrack);
     const collected = [];
+    const seenIds = new Set();
     const seenUrls = new Set();
 
     const pushSpotifyTrack = (rawTrack) => {
       if (!rawTrack) return;
+      const spotifyId = String(rawTrack.id || '').trim();
+      if (spotifyId && seenIds.has(spotifyId)) return;
       const mapped = this.spotify.mapTrack(rawTrack);
       const url = mapped.url || '';
       if (url && seenUrls.has(url)) return;
+      if (spotifyId) seenIds.add(spotifyId);
       if (url) seenUrls.add(url);
       collected.push(mapped);
     };
@@ -534,8 +611,8 @@ class MusicManager {
     const primaryArtist = String(seedTrack?.author || '').split(',')[0].trim();
     const cleanTitle = this.cleanSpotifyTitle(seedTrack?.title || '');
     const queries = [
-      [primaryArtist, 'best hits'].filter(Boolean).join(' '),
       [cleanTitle, primaryArtist].filter(Boolean).join(' '),
+      [primaryArtist, 'official'].filter(Boolean).join(' '),
       primaryArtist
     ].filter(Boolean);
 
@@ -566,14 +643,17 @@ class MusicManager {
     });
     if (!filtered.length) return null;
 
-    const shuffled = filtered
-      .map((track) => ({ track, sort: Math.random() }))
-      .sort((a, b) => a.sort - b.sort)
+    const ranked = filtered
+      .map((track) => ({
+        track,
+        score: this.scoreAutoplaySpotifyCandidate(track, seedTrack)
+      }))
+      .sort((a, b) => b.score - a.score)
       .map((entry) => entry.track);
 
-    const maxAttempts = Math.min(14, shuffled.length);
+    const maxAttempts = Math.min(18, ranked.length);
     for (let i = 0; i < maxAttempts; i += 1) {
-      const candidate = shuffled[i];
+      const candidate = ranked[i];
       const resolved = await this.resolveSingleSpotifyTrack(node, candidate, requestedBy);
       if (!resolved) continue;
 
@@ -909,7 +989,7 @@ class MusicManager {
     const next = queue.tracks.shift();
 
     if (!next) {
-      const allowAutoplay = ['finished', 'loadFailed', 'cleanup'].includes(endReason);
+      const allowAutoplay = ['finished', 'loadFailed', 'cleanup', 'stopped'].includes(endReason);
       if (allowAutoplay) {
         const startedAutoplay = await this.tryAutoplayWhenQueueEnds(queue, lastTrack);
         if (startedAutoplay) return this.playNext(queue, { endReason: 'autoplay' });

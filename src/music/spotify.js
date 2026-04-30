@@ -90,11 +90,13 @@ class SpotifyService {
 
     return {
       source: 'spotify',
+      spotifyId: track.id || null,
       title: track.name,
       author: artists,
       duration: track.duration_ms,
       url: track.external_urls?.spotify || null,
-      thumbnail
+      thumbnail,
+      popularity: Number.isFinite(track.popularity) ? track.popularity : null
     };
   }
 
