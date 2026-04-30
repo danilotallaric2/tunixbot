@@ -2,6 +2,7 @@ const { errorEmbed } = require('../utils/embeds');
 const { safeReply } = require('../utils/reply');
 const logger = require('../utils/logger');
 const { inspect } = require('util');
+const { getInteractionLocale, t } = require('../utils/i18n');
 
 module.exports = {
   name: 'interactionCreate',
@@ -33,8 +34,15 @@ module.exports = {
       );
       logger.error('Command error details', inspect(error, { depth: 6, colors: false }));
 
+      const locale = getInteractionLocale(interaction);
       await safeReply(interaction, {
-        embeds: [errorEmbed('Errore Comando', error.message || 'Si e verificato un errore durante il comando.')],
+        embeds: [
+          errorEmbed(
+            t(locale, 'errors.commandTitle'),
+            error.message || t(locale, 'errors.commandExecution'),
+            locale
+          )
+        ],
         ephemeral: true
       });
     }

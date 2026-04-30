@@ -1,5 +1,6 @@
 const { PermissionsBitField } = require('discord.js');
 const { missingPermsEmbed, errorEmbed } = require('./embeds');
+const { getInteractionLocale, t } = require('./i18n');
 
 const VOICE_PERMS = [
   { name: 'ViewChannel', flag: PermissionsBitField.Flags.ViewChannel },
@@ -11,8 +12,9 @@ const ensureUserInVoice = async (interaction) => {
   const voiceChannel = interaction.member.voice?.channel;
 
   if (!voiceChannel) {
+    const locale = getInteractionLocale(interaction);
     await interaction.reply({
-      embeds: [errorEmbed('Canale Vocale Richiesto', 'Devi entrare in un canale vocale prima di usare i comandi musicali.')],
+      embeds: [errorEmbed(t(locale, 'permissions.voiceRequiredTitle'), t(locale, 'permissions.voiceRequiredMessage'), locale)],
       ephemeral: true
     });
     return null;
@@ -22,10 +24,11 @@ const ensureUserInVoice = async (interaction) => {
 };
 
 const ensureBotVoicePermissions = async (interaction, voiceChannel) => {
+  const locale = getInteractionLocale(interaction);
   const me = interaction.guild.members.me || (await interaction.guild.members.fetchMe().catch(() => null));
   if (!me) {
     await interaction.reply({
-      embeds: [errorEmbed('Permessi Non Verificabili', 'Non riesco a verificare i miei permessi in questo server.')],
+      embeds: [errorEmbed(t(locale, 'permissions.permsCheckFailedTitle'), t(locale, 'permissions.permsCheckFailedMessage'), locale)],
       ephemeral: true
     });
     return false;
@@ -36,14 +39,12 @@ const ensureBotVoicePermissions = async (interaction, voiceChannel) => {
 
   if (missing.length > 0) {
     await interaction.reply({
-      embeds: [missingPermsEmbed(missing.map((perm) => `\`${perm.name}\``))],
+      embeds: [missingPermsEmbed(missing.map((perm) => `\`${perm.name}\``), locale)],
       ephemeral: true
     });
     return false;
   }
 
-  // If the channel has reached user limit and bot is not already inside,
-  // joining will fail even with Connect permission.
   const isAlreadyInChannel = me.voice?.channelId === voiceChannel.id;
   const userLimitReached =
     Number.isInteger(voiceChannel.userLimit) &&
@@ -52,12 +53,7 @@ const ensureBotVoicePermissions = async (interaction, voiceChannel) => {
 
   if (!isAlreadyInChannel && userLimitReached) {
     await interaction.reply({
-      embeds: [
-        errorEmbed(
-          'Impossibile Entrare',
-          'Il canale vocale e pieno. Libera uno slot oppure aumenta il limite utenti del canale.'
-        )
-      ],
+      embeds: [errorEmbed(t(locale, 'permissions.channelFullTitle'), t(locale, 'permissions.channelFullMessage'), locale)],
       ephemeral: true
     });
     return false;
@@ -70,11 +66,13 @@ const ensureSameVoiceChannel = async (interaction, queue) => {
   const userChannelId = interaction.member.voice?.channelId;
 
   if (!userChannelId || userChannelId !== queue.voiceChannelId) {
+    const locale = getInteractionLocale(interaction);
     await interaction.reply({
       embeds: [
         errorEmbed(
-          'Canale Non Valido',
-          'Per controllare la riproduzione devi essere nello stesso canale vocale del bot.'
+          t(locale, 'permissions.invalidControlChannelTitle'),
+          t(locale, 'permissions.invalidControlChannelMessage'),
+          locale
         )
       ],
       ephemeral: true

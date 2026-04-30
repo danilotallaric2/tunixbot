@@ -4,6 +4,7 @@ const { requireVoiceForPlay } = require('../utils/commandChecks');
 const { baseEmbed, errorEmbed } = require('../utils/embeds');
 const logger = require('../utils/logger');
 const { inspect } = require('util');
+const { getInteractionLocale, t, localizeErrorMessage } = require('../utils/i18n');
 
 const isValidHttpUrl = (value) => {
   if (typeof value !== 'string' || !value.trim()) return false;
@@ -15,24 +16,25 @@ const isValidHttpUrl = (value) => {
   }
 };
 
-const getReadableErrorMessage = (error) => {
-  if (typeof error?.message === 'string' && error.message.trim()) return error.message.trim();
+const getReadableErrorMessage = (error, locale) => {
   if (Array.isArray(error?.errors) && error.errors.length > 0) {
-    return error.errors
-      .map((e) => {
-        if (typeof e?.message === 'string' && e.message.trim()) return e.message.trim();
-        return String(e);
-      })
-      .join(' | ');
+    const pieces = error.errors.map((e) => localizeErrorMessage(locale, e, 'errors.genericOperation'));
+    return pieces.join(' | ');
   }
-  return 'Join fallito.';
+
+  return localizeErrorMessage(locale, error, 'errors.genericOperation') || t(locale, 'errors.genericOperation');
 };
 
 module.exports = {
-  data: new SlashCommandBuilder().setName('join').setDescription('Fa entrare TunixBot nel tuo canale vocale.'),
+  data: new SlashCommandBuilder()
+    .setName('join')
+    .setDescription('Make TunixBot join your voice channel.')
+    .setDescriptionLocalizations({ it: t('it', 'commands.joinDescription') }),
   async execute(interaction) {
     const voiceChannel = await requireVoiceForPlay(interaction);
     if (!voiceChannel) return;
+
+    const locale = getInteractionLocale(interaction);
 
     try {
       const result = await interaction.client.musicManager.join(interaction, voiceChannel);
@@ -40,29 +42,32 @@ module.exports = {
       if (isValidHttpUrl(config.dashboard.publicUrl)) {
         components.push(
           new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setLabel('Apri Dashboard').setStyle(ButtonStyle.Link).setURL(config.dashboard.publicUrl)
+            new ButtonBuilder().setLabel(t(locale, 'embeds.dashboardButton')).setStyle(ButtonStyle.Link).setURL(config.dashboard.publicUrl)
           )
         );
       }
 
       await interaction.reply({
         embeds: [
-          baseEmbed('Connesso', 0x27d3ff).setDescription(
+          baseEmbed(t(locale, 'embeds.joinedTitle'), 0x27d3ff).setDescription(
             result.created
-              ? `Entrato in **${voiceChannel.name}**. Vai nella dashboard con il bottone qui sotto.`
-              : `Sono gia in **${voiceChannel.name}**. Puoi aprire la dashboard dal bottone qui sotto.`
+              ? t(locale, 'embeds.joinedCreatedMessage', { channel: voiceChannel.name })
+              : t(locale, 'embeds.joinedExistingMessage', { channel: voiceChannel.name })
           )
         ],
         components
       });
     } catch (error) {
-      const message = getReadableErrorMessage(error);
+      const message = getReadableErrorMessage(error, locale);
       logger.error(
         `Join command failed (user=${interaction.user?.id} guild=${interaction.guildId} channel=${interaction.channelId})`,
         error
       );
       logger.error('Join command error details', inspect(error, { depth: 6, colors: false }));
-      await interaction.reply({ embeds: [errorEmbed('Join Fallito', message)], ephemeral: true });
+      await interaction.reply({
+        embeds: [errorEmbed(t(locale, 'embeds.joinFailedTitle'), message, locale)],
+        ephemeral: true
+      });
     }
   }
 };

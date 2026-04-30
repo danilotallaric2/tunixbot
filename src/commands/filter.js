@@ -1,15 +1,18 @@
 const { SlashCommandBuilder } = require('discord.js');
 const { requireActiveQueueAndVoice } = require('../utils/commandChecks');
 const { errorEmbed } = require('../utils/embeds');
+const { getInteractionLocale, t } = require('../utils/i18n');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('filter')
-    .setDescription('Applica un filtro audio.')
+    .setDescription('Apply an audio filter.')
+    .setDescriptionLocalizations({ it: t('it', 'commands.filterDescription') })
     .addStringOption((option) =>
       option
         .setName('nome')
-        .setDescription('Filtro')
+        .setDescription('Filter')
+        .setDescriptionLocalizations({ it: t('it', 'commands.optionFilter') })
         .setRequired(true)
         .addChoices(
           { name: 'bassboost', value: 'bassboost' },
@@ -23,13 +26,17 @@ module.exports = {
     const queue = await requireActiveQueueAndVoice(interaction);
     if (!queue) return;
 
+    const locale = getInteractionLocale(interaction);
     const name = interaction.options.getString('nome', true);
 
     try {
       await interaction.client.musicManager.applyFilter(interaction.guildId, name);
-      await interaction.reply({ embeds: [interaction.client.musicManager.buildFilterEmbed(name)] });
+      await interaction.reply({ embeds: [interaction.client.musicManager.buildFilterEmbed(name, locale)] });
     } catch (error) {
-      await interaction.reply({ embeds: [errorEmbed('Errore Filtro', error.message)], ephemeral: true });
+      await interaction.reply({
+        embeds: [errorEmbed(t(locale, 'embeds.filterErrorTitle'), error.message, locale)],
+        ephemeral: true
+      });
     }
   }
 };

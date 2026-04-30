@@ -16,6 +16,12 @@ const {
   volumeControls,
   baseEmbed
 } = require('../utils/embeds');
+const {
+  normalizeLocale,
+  getInteractionLocale,
+  t,
+  localizeErrorMessage
+} = require('../utils/i18n');
 
 class MusicManager {
   constructor(client) {
@@ -123,6 +129,15 @@ class MusicManager {
 
   getQueue(guildId) {
     return this.queues.get(guildId);
+  }
+
+  resolveQueueLocale(queue, fallback = 'en') {
+    return normalizeLocale(queue?.locale || fallback);
+  }
+
+  setQueueLocale(queue, locale) {
+    if (!queue) return;
+    queue.locale = normalizeLocale(locale || queue.locale || 'en');
   }
 
   getPlayerPosition(queue) {
@@ -589,11 +604,12 @@ class MusicManager {
     if (!autoTrack) return false;
 
     queue.tracks.push(autoTrack);
+    const locale = this.resolveQueueLocale(queue);
 
     await this.safeTextSend(queue.textChannelId, {
       embeds: [
-        baseEmbed('Autoplay Attivo', config.theme.secondary).setDescription(
-          `Coda finita. Continuo con un brano consigliato da Spotify:\n**${autoTrack.title}** - ${autoTrack.author}`
+        baseEmbed(t(locale, 'embeds.autoplayTitle'), config.theme.secondary).setDescription(
+          t(locale, 'embeds.autoplayMessage', { title: autoTrack.title, author: autoTrack.author })
         )
       ]
     });
@@ -623,11 +639,12 @@ class MusicManager {
     queue.currentStarted = false;
     this.resetPositionClock(queue, 0);
     queue.paused = false;
+    const locale = this.resolveQueueLocale(queue);
 
     await this.safeTextSend(queue.textChannelId, {
       embeds: [
-        baseEmbed('Recupero Traccia', config.theme.warning).setDescription(
-          `Il brano **${failedTrack.title}** non era riproducibile.\nProvo una sorgente alternativa...`
+        baseEmbed(t(locale, 'embeds.trackRecoverTitle'), config.theme.warning).setDescription(
+          t(locale, 'embeds.trackRecoverFallbackMessage', { title: failedTrack.title })
         )
       ]
     });
@@ -708,7 +725,7 @@ class MusicManager {
     };
   }
 
-  async createQueue(interaction, voiceChannel) {
+  async createQueue(interaction, voiceChannel, locale = 'en') {
     this.assertLavalinkAvailable();
     const shardId = Number.isInteger(interaction.guild.shardId) ? interaction.guild.shardId : 0;
 
@@ -727,7 +744,8 @@ class MusicManager {
       voiceChannelId: voiceChannel.id,
       player,
       defaultVolume: config.music.defaultVolume,
-      autoDisconnectMs: config.music.autoDisconnectMs
+      autoDisconnectMs: config.music.autoDisconnectMs,
+      locale
     });
 
     this.attachPlayerEvents(queue);
@@ -736,7 +754,7 @@ class MusicManager {
     return queue;
   }
 
-  async createQueueByIds({ guildId, voiceChannelId, textChannelId }) {
+  async createQueueByIds({ guildId, voiceChannelId, textChannelId, locale = 'en' }) {
     this.assertLavalinkAvailable();
     const guild = this.client.guilds.cache.get(guildId) || (await this.client.guilds.fetch(guildId).catch(() => null));
     if (!guild) throw new Error('Guild non trovata.');
@@ -758,7 +776,8 @@ class MusicManager {
       voiceChannelId,
       player,
       defaultVolume: config.music.defaultVolume,
-      autoDisconnectMs: config.music.autoDisconnectMs
+      autoDisconnectMs: config.music.autoDisconnectMs,
+      locale
     });
 
     this.attachPlayerEvents(queue);
@@ -785,8 +804,9 @@ class MusicManager {
       queue.clearTrackStartTimeout();
       logger.error(`Track exception in guild ${queue.guildId}: ${event?.exception?.message || 'Unknown error'}`);
       this.logTrackFailureContext(queue, 'exception', event, queue.current);
+      const locale = this.resolveQueueLocale(queue);
       await this.safeTextSend(queue.textChannelId, {
-        embeds: [errorEmbed('Errore Traccia', 'Il brano corrente ha generato un errore. Passo al prossimo...')]
+        embeds: [errorEmbed(t(locale, 'embeds.trackErrorTitle'), t(locale, 'embeds.trackErrorMessage'), locale)]
       });
       await this.onTrackEnd(queue, 'loadFailed');
     });
@@ -794,8 +814,9 @@ class MusicManager {
     queue.player.on('stuck', async (event) => {
       queue.clearTrackStartTimeout();
       this.logTrackFailureContext(queue, 'stuck', event, queue.current);
+      const locale = this.resolveQueueLocale(queue);
       await this.safeTextSend(queue.textChannelId, {
-        embeds: [errorEmbed('Traccia Bloccata', 'La traccia si e bloccata. Passo al prossimo brano...')]
+        embeds: [errorEmbed(t(locale, 'embeds.trackStuckTitle'), t(locale, 'embeds.trackStuckMessage'), locale)]
       });
       await this.onTrackEnd(queue, 'loadFailed');
     });
@@ -808,11 +829,12 @@ class MusicManager {
       if (!latest) return;
       if (!latest.current || latest.currentSessionId !== expectedSessionId) return;
       if (latest.currentStarted) return;
+      const locale = this.resolveQueueLocale(latest);
 
       await this.safeTextSend(latest.textChannelId, {
         embeds: [
-          baseEmbed('Recupero Traccia', config.theme.warning).setDescription(
-            `Il brano **${latest.current.title}** non e partito in tempo utile. Provo a recuperarlo...`
+          baseEmbed(t(locale, 'embeds.trackRecoverTitle'), config.theme.warning).setDescription(
+            t(locale, 'embeds.trackRecoverTimeoutMessage', { title: latest.current.title })
           )
         ]
       });
@@ -886,7 +908,7 @@ class MusicManager {
       }
 
       queue.current = null;
-      await this.markNowPlayingAsEnded(queue, 'La coda e terminata.');
+      await this.markNowPlayingAsEnded(queue, t(this.resolveQueueLocale(queue), 'embeds.nowPlayingEnded'));
       return;
     }
 
@@ -921,9 +943,14 @@ class MusicManager {
 
       const humanMembers = channel.members.filter((m) => !m.user.bot);
       if (humanMembers.size > 0) return;
+      const locale = this.resolveQueueLocale(checkQueue);
 
       await this.safeTextSend(checkQueue.textChannelId, {
-        embeds: [baseEmbed('Auto Disconnect', config.theme.warning).setDescription('Sono rimasto da solo nel canale vocale per 10 secondi. Mi disconnetto ora.')]
+        embeds: [
+          baseEmbed(t(locale, 'embeds.voiceAutoDisconnectTitle'), config.theme.warning).setDescription(
+            t(locale, 'embeds.voiceAutoDisconnectMessage')
+          )
+        ]
       });
 
       await this.destroyQueue(checkQueue.guildId);
@@ -952,10 +979,11 @@ class MusicManager {
         queue.voiceChannelId = newState.channelId;
         queue.clearDisconnectTimer();
       } else if (disconnectedFromTracked) {
+        const locale = this.resolveQueueLocale(queue);
         await this.safeTextSend(queue.textChannelId, {
           embeds: [
-            baseEmbed('Sessione Terminata', config.theme.warning).setDescription(
-              'Sono stato disconnesso dal canale vocale. Sessione chiusa.'
+            baseEmbed(t(locale, 'embeds.sessionClosedTitle'), config.theme.warning).setDescription(
+              t(locale, 'embeds.sessionClosedMessage')
             )
           ]
         });
@@ -1020,16 +1048,18 @@ class MusicManager {
     }
   }
 
-  async enqueueQuery({ guildId, query, voiceChannelId, textChannelId, requestedBy }) {
+  async enqueueQuery({ guildId, query, voiceChannelId, textChannelId, requestedBy, locale = 'en' }) {
     this.assertLavalinkAvailable();
     const existing = this.getQueue(guildId);
-    const queue = existing || (await this.createQueueByIds({ guildId, voiceChannelId, textChannelId }));
+    const queue =
+      existing || (await this.createQueueByIds({ guildId, voiceChannelId, textChannelId, locale: normalizeLocale(locale) }));
 
     if (existing && existing.voiceChannelId !== voiceChannelId) {
       throw new Error('Sono gia attivo in un altro canale vocale.');
     }
 
     queue.textChannelId = textChannelId;
+    this.setQueueLocale(queue, locale);
 
     const node = queue.player.node || this.getIdealNodeSafe();
     if (!node) throw new Error('Nessun nodo Lavalink disponibile.');
@@ -1065,12 +1095,14 @@ class MusicManager {
   }
 
   async play(interaction, query, voiceChannel) {
+    const locale = getInteractionLocale(interaction);
     const result = await this.enqueueQuery({
       guildId: interaction.guildId,
       query,
       voiceChannelId: voiceChannel.id,
       textChannelId: interaction.channelId,
-      requestedBy: interaction.user.id
+      requestedBy: interaction.user.id,
+      locale
     });
 
     if (!interaction.deferred && !interaction.replied) {
@@ -1078,17 +1110,32 @@ class MusicManager {
     }
 
     if (result.sourceKind === 'playlist' || result.addedCount > 1) {
-      const skippedSuffix = result.skippedCount > 0 ? `\nSaltati (non trovati): **${result.skippedCount}**` : '';
+      const skippedSuffix =
+        result.skippedCount > 0
+          ? locale === 'it'
+            ? `\nSaltati (non trovati): **${result.skippedCount}**`
+            : `\nSkipped (not found): **${result.skippedCount}**`
+          : '';
       await interaction.editReply({
         embeds: [
-          playlistLoadedEmbed(result.playlistName, result.addedCount).setDescription(
-            `Aggiunti **${result.addedCount}** brani${result.playlistName ? ` dalla playlist **${result.playlistName}**` : ''}.${skippedSuffix}`
+          playlistLoadedEmbed(result.playlistName, result.addedCount, locale).setDescription(
+            `${t(locale, 'embeds.playlistLoadedMessage', {
+              count: result.addedCount,
+              suffix:
+                result.playlistName && locale === 'it'
+                  ? ` dalla playlist **${result.playlistName}**`
+                  : result.playlistName
+                    ? ` from playlist **${result.playlistName}**`
+                    : ''
+            })}${skippedSuffix}`
           )
         ]
       });
     } else if (!result.willStartImmediately) {
       const single = result.firstTrack;
-      const embed = baseEmbed('Brano In Coda', config.theme.success).setDescription(`Aggiunto **${single.title}**`);
+      const embed = baseEmbed(t(locale, 'embeds.queueTrackAddedTitle'), config.theme.success).setDescription(
+        t(locale, 'embeds.queueTrackAddedMessage', { title: single.title })
+      );
       if (single.thumbnail) embed.setThumbnail(single.thumbnail);
 
       await interaction.editReply({ embeds: [embed] });
@@ -1098,6 +1145,7 @@ class MusicManager {
   }
 
   async join(interaction, voiceChannel) {
+    const locale = getInteractionLocale(interaction);
     this.assertLavalinkAvailable();
     const existing = this.getQueue(interaction.guildId);
     if (existing) {
@@ -1107,12 +1155,14 @@ class MusicManager {
       existing.textChannelId = interaction.channelId;
       existing.joinedByUserId = interaction.user.id;
       existing.joinedAt = Date.now();
+      this.setQueueLocale(existing, locale);
       return { created: false, voiceChannelId: existing.voiceChannelId };
     }
 
-    const queue = await this.createQueue(interaction, voiceChannel);
+    const queue = await this.createQueue(interaction, voiceChannel, locale);
     queue.joinedByUserId = interaction.user.id;
     queue.joinedAt = Date.now();
+    this.setQueueLocale(queue, locale);
     return { created: true, voiceChannelId: queue.voiceChannelId };
   }
 
@@ -1144,6 +1194,7 @@ class MusicManager {
   async stop(guildId) {
     const queue = this.getQueue(guildId);
     if (!queue) throw new Error('Nessuna sessione attiva.');
+    const locale = this.resolveQueueLocale(queue);
 
     queue.tracks = [];
     const hadCurrent = Boolean(queue.current);
@@ -1159,7 +1210,7 @@ class MusicManager {
       await queue.player.stopTrack().catch(() => null);
     }
 
-    await this.markNowPlayingAsEnded(queue, 'Riproduzione fermata. Il bot resta nel canale vocale.');
+    await this.markNowPlayingAsEnded(queue, t(locale, 'embeds.nowPlayingStopped'));
 
     const channel = await this.client.channels.fetch(queue.voiceChannelId).catch(() => null);
     if (channel && channel.isVoiceBased()) {
@@ -1272,10 +1323,11 @@ class MusicManager {
     return queue;
   }
 
-  getQueueEmbed(guildId, page = 0) {
+  getQueueEmbed(guildId, page = 0, locale = null) {
     const queue = this.getQueue(guildId);
-    if (!queue) return queueEmbed([], page, 10, null);
-    return queueEmbed(queue.tracks, page, 10, queue.current);
+    const resolvedLocale = normalizeLocale(locale || this.resolveQueueLocale(queue));
+    if (!queue) return queueEmbed([], page, 10, null, resolvedLocale);
+    return queueEmbed(queue.tracks, page, 10, queue.current, resolvedLocale);
   }
 
   getNowPlayingData(guildId) {
@@ -1307,6 +1359,7 @@ class MusicManager {
     }
     queue.clearNowPlayingTimer();
 
+    const locale = this.resolveQueueLocale(queue);
     const payload = {
       embeds: [
         nowPlayingEmbed(queue.current, {
@@ -1314,9 +1367,9 @@ class MusicManager {
           loop: queue.loopMode,
           paused: queue.paused,
           position: this.getPlayerPosition(queue)
-        })
+        }, locale)
       ],
-      components: [nowPlayingControls({ paused: queue.paused, loop: queue.loopMode }), volumeControls()]
+      components: [nowPlayingControls({ paused: queue.paused, loop: queue.loopMode }, locale), volumeControls(locale)]
     };
 
     const message = await channel.send(payload).catch(() => null);
@@ -1355,6 +1408,7 @@ class MusicManager {
       return;
     }
 
+    const locale = this.resolveQueueLocale(queue);
     await message
       .edit({
         embeds: [
@@ -1363,14 +1417,14 @@ class MusicManager {
             loop: queue.loopMode,
             paused: queue.paused,
             position: this.getPlayerPosition(queue)
-          })
+          }, locale)
         ],
-        components: [nowPlayingControls({ paused: queue.paused, loop: queue.loopMode }), volumeControls()]
+        components: [nowPlayingControls({ paused: queue.paused, loop: queue.loopMode }, locale), volumeControls(locale)]
       })
       .catch(() => null);
   }
 
-  async markNowPlayingAsEnded(queue, description = 'La sessione e terminata.') {
+  async markNowPlayingAsEnded(queue, description = null) {
     queue.clearNowPlayingTimer();
 
     if (!queue.nowPlayingMessageId) return;
@@ -1384,15 +1438,17 @@ class MusicManager {
       return;
     }
 
+    const locale = this.resolveQueueLocale(queue);
+    const finalDescription = description || t(locale, 'embeds.sessionEndedMessage');
     await message
       .edit({
-        embeds: [baseEmbed('Riproduzione Terminata', config.theme.warning).setDescription(description)],
+        embeds: [baseEmbed(t(locale, 'embeds.endedTitle'), config.theme.warning).setDescription(finalDescription)],
         components: []
       })
       .catch(() => null);
   }
 
-  async getLyrics(guildId) {
+  async getLyrics(guildId, locale = 'en') {
     const queue = this.getQueue(guildId);
     if (!queue || !queue.current) throw new Error('Nessun brano in riproduzione.');
 
@@ -1407,7 +1463,7 @@ class MusicManager {
 
     const trimmed = data.lyrics.length > 3900 ? `${data.lyrics.slice(0, 3900)}\n...` : data.lyrics;
 
-    return baseEmbed('Lyrics', config.theme.secondary)
+    return baseEmbed(t(locale, 'embeds.lyricsTitle'), config.theme.secondary)
       .setDescription(`**${queue.current.title}** - ${queue.current.author}\n\n${trimmed}`);
   }
 
@@ -1416,16 +1472,21 @@ class MusicManager {
 
     const action = interaction.customId.split(':')[1];
     const queue = this.getQueue(interaction.guildId);
+    const locale = getInteractionLocale(interaction);
 
     if (!queue) {
-      await interaction.reply({ embeds: [errorEmbed('Sessione Non Trovata', 'Nessuna sessione musicale attiva.')], ephemeral: true });
+      await interaction.reply({
+        embeds: [errorEmbed(t(locale, 'errors.sessionTitle'), t(locale, 'errors.sessionMissing'), locale)],
+        ephemeral: true
+      });
       return;
     }
+    this.setQueueLocale(queue, locale);
 
     const sameChannel = interaction.member.voice?.channelId === queue.voiceChannelId;
     if (!sameChannel) {
       await interaction.reply({
-        embeds: [errorEmbed('Canale Non Valido', 'Devi essere nello stesso canale vocale del bot per usare i pulsanti.')],
+        embeds: [errorEmbed(t(locale, 'errors.invalidChannelTitle'), t(locale, 'errors.invalidChannelMessage'), locale)],
         ephemeral: true
       });
       return;
@@ -1439,13 +1500,13 @@ class MusicManager {
         await this.skip(interaction.guildId);
       } else if (action === 'stop') {
         await interaction.update({
-          embeds: [baseEmbed('Riproduzione Fermata', config.theme.warning).setDescription('Coda svuotata. Il bot resta nel canale vocale.')],
+          embeds: [baseEmbed(t(locale, 'embeds.endedTitle'), config.theme.warning).setDescription(t(locale, 'embeds.nowPlayingStopped'))],
           components: []
         });
         await this.stop(interaction.guildId);
         return;
       } else if (action === 'queue') {
-        await interaction.reply({ embeds: [this.getQueueEmbed(interaction.guildId)], ephemeral: true });
+        await interaction.reply({ embeds: [this.getQueueEmbed(interaction.guildId, 0, locale)], ephemeral: true });
         return;
       } else if (action === 'loop') {
         const modes = ['off', 'song', 'queue'];
@@ -1460,29 +1521,32 @@ class MusicManager {
       const now = this.getNowPlayingData(interaction.guildId);
       if (now) {
         await interaction.update({
-          embeds: [nowPlayingEmbed(now.track, now.state)],
-          components: [nowPlayingControls({ paused: now.state.paused, loop: now.state.loop }), volumeControls()]
+          embeds: [nowPlayingEmbed(now.track, now.state, locale)],
+          components: [
+            nowPlayingControls({ paused: now.state.paused, loop: now.state.loop }, locale),
+            volumeControls(locale)
+          ]
         });
       } else {
         await interaction.update({
-          embeds: [baseEmbed('Riproduzione Terminata', config.theme.warning).setDescription('La sessione e terminata.')],
+          embeds: [baseEmbed(t(locale, 'embeds.endedTitle'), config.theme.warning).setDescription(t(locale, 'embeds.sessionEndedMessage'))],
           components: []
         });
       }
     } catch (error) {
       await interaction.reply({
-        embeds: [errorEmbed('Errore Pulsante', error.message || 'Operazione non riuscita.')],
+        embeds: [errorEmbed(t(locale, 'errors.buttonTitle'), localizeErrorMessage(locale, error), locale)],
         ephemeral: true
       });
     }
   }
 
-  buildVolumeEmbed(volume) {
-    return volumeEmbed(volume);
+  buildVolumeEmbed(volume, locale = 'en') {
+    return volumeEmbed(volume, locale);
   }
 
-  buildFilterEmbed(filter) {
-    return filtersEmbed(filter);
+  buildFilterEmbed(filter, locale = 'en') {
+    return filtersEmbed(filter, locale);
   }
 
   async searchTracks(query, options = {}) {

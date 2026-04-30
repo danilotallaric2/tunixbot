@@ -7,6 +7,7 @@ const config = require('../config');
 const logger = require('../utils/logger');
 const { formatDuration } = require('../utils/time');
 const JsonSessionStore = require('./jsonSessionStore');
+const { normalizeLocale, t, localizeErrorMessage } = require('../utils/i18n');
 
 const DISCORD_API = 'https://discord.com/api/v10';
 const LRCLIB_API = 'https://lrclib.net/api/get';
@@ -23,6 +24,11 @@ const parseSearchSource = (value) => {
 };
 
 const SESSION_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 30;
+
+const getRequestLocale = (req) => normalizeLocale(req?.session?.user?.locale || req?.session?.locale || 'en');
+const tr = (req, key, vars = {}) => t(getRequestLocale(req), key, vars);
+const formatApiError = (req, error, fallbackKey = 'errors.apiGeneric') =>
+  localizeErrorMessage(getRequestLocale(req), error, fallbackKey);
 
 const getSessionSecret = () => {
   if (process.env.DASHBOARD_SESSION_SECRET) return process.env.DASHBOARD_SESSION_SECRET;
@@ -124,7 +130,7 @@ const createDashboardServer = (client) => {
 
   const requireAuth = (req, res, next) => {
     if (!req.session.user) {
-      res.status(401).json({ error: 'Login richiesto' });
+      res.status(401).json({ error: tr(req, 'dashboard.loginRequired') });
       return;
     }
     next();
@@ -202,46 +208,51 @@ const createDashboardServer = (client) => {
   };
 
   const buildSessionPayload = async (req) => {
+    const locale = getRequestLocale(req);
     const queue = await findSessionQueueForUser(req);
     if (!queue) {
       return {
+        locale,
         session: null,
         state: buildStateFromQueue(client, null),
         canControl: false,
-        message: 'Nessuna sessione trovata. Usa /join da Discord nel canale vocale desiderato.'
+        message: t(locale, 'dashboard.sessionNotFound')
       };
     }
 
     const guild = client.guilds.cache.get(queue.guildId) || (await client.guilds.fetch(queue.guildId).catch(() => null));
     if (!guild) {
       return {
+        locale,
         session: null,
         state: buildStateFromQueue(client, null),
         canControl: false,
-        message: 'La guild della sessione non e piu disponibile.'
+        message: t(locale, 'dashboard.sessionGuildUnavailable')
       };
     }
 
     const userVoiceChannelId = await getMemberVoiceChannelId(guild, req.session.user.id);
     const canControl = Boolean(userVoiceChannelId && userVoiceChannelId === queue.voiceChannelId);
+    if (canControl) client.musicManager.setQueueLocale(queue, locale);
 
     const voiceChannel = guild.channels.cache.get(queue.voiceChannelId) || (await guild.channels.fetch(queue.voiceChannelId).catch(() => null));
     const textChannel = guild.channels.cache.get(queue.textChannelId) || (await guild.channels.fetch(queue.textChannelId).catch(() => null));
 
     return {
+      locale,
       session: {
         guildId: queue.guildId,
         guildName: guild.name,
         voiceChannelId: queue.voiceChannelId,
-        voiceChannelName: voiceChannel?.name || 'Unknown Voice',
+        voiceChannelName: voiceChannel?.name || t(locale, 'dashboard.unknownVoice'),
         textChannelId: queue.textChannelId,
-        textChannelName: textChannel?.name || 'Unknown Text',
+        textChannelName: textChannel?.name || t(locale, 'dashboard.unknownText'),
         joinedAt: queue.joinedAt || 0
       },
       state: buildStateFromQueue(client, queue),
       canControl,
       userVoiceChannelId,
-      message: canControl ? 'Connesso e autorizzato.' : 'Entra nella stessa vocale del bot per controllare la musica.'
+      message: canControl ? t(locale, 'dashboard.connectedAndAuthorized') : t(locale, 'dashboard.enterSameVoice')
     };
   };
 
@@ -261,8 +272,8 @@ const createDashboardServer = (client) => {
     if (!sessionPayload.session) throw new Error(sessionPayload.message);
 
     const queue = client.musicManager.getQueue(sessionPayload.session.guildId);
-    if (!queue) throw new Error('Nessuna sessione musicale attiva.');
-    if (!queue.current) throw new Error('Nessun brano in riproduzione.');
+    if (!queue) throw new Error(t(getRequestLocale(req), 'dashboard.noSessionActive'));
+    if (!queue.current) throw new Error(t(getRequestLocale(req), 'dashboard.noTrackPlaying'));
 
     return {
       session: sessionPayload.session,
@@ -270,7 +281,7 @@ const createDashboardServer = (client) => {
     };
   };
 
-  const fetchSyncedLyrics = async (track) => {
+  const fetchSyncedLyrics = async (track, locale = 'en') => {
     const url = new URL(LRCLIB_API);
     url.searchParams.set('track_name', track.title || '');
     url.searchParams.set('artist_name', (track.author || '').split(',')[0].trim());
@@ -283,7 +294,7 @@ const createDashboardServer = (client) => {
     });
 
     if (!response.ok) {
-      throw new Error('Lyrics non trovate.');
+      throw new Error(t(locale, 'dashboard.lyricsNotFound'));
     }
 
     const data = await response.json();
@@ -295,7 +306,7 @@ const createDashboardServer = (client) => {
 
   app.get('/auth/discord/login', (req, res) => {
     if (!config.discord.clientSecret) {
-      res.status(500).send('DISCORD_CLIENT_SECRET mancante nel .env');
+      res.status(500).send(t('en', 'dashboard.oauthSecretMissing'));
       return;
     }
 
@@ -316,16 +327,18 @@ const createDashboardServer = (client) => {
 
   app.get('/auth/discord/callback', async (req, res) => {
     try {
+      const locale = getRequestLocale(req);
       if (!req.query.code || !req.query.state) {
-        throw new Error('Callback OAuth incompleto');
+        throw new Error(t(locale, 'dashboard.oauthIncomplete'));
       }
 
       if (req.session.oauthState !== req.query.state) {
-        throw new Error('State OAuth non valido');
+        throw new Error(t(locale, 'dashboard.oauthStateInvalid'));
       }
 
       const token = await fetchDiscordToken(String(req.query.code));
       const profile = await fetchDiscordProfile(token.access_token);
+      const userLocale = normalizeLocale(profile.user?.locale || 'en');
 
       req.session.user = {
         id: profile.user.id,
@@ -333,14 +346,18 @@ const createDashboardServer = (client) => {
         globalName: profile.user.global_name || profile.user.username,
         avatar: profile.user.avatar,
         avatarUrl: buildUserAvatar(profile.user),
-        guilds: profile.guilds.map((g) => ({ id: g.id, name: g.name }))
+        guilds: profile.guilds.map((g) => ({ id: g.id, name: g.name })),
+        locale: userLocale,
+        discordLocale: profile.user?.locale || null
       };
+      req.session.locale = userLocale;
 
       delete req.session.oauthState;
       res.redirect('/');
     } catch (error) {
       logger.error('OAuth callback failed', error);
-      res.status(500).send(`Login fallito: ${error.message}`);
+      const locale = getRequestLocale(req);
+      res.status(500).send(t(locale, 'dashboard.oauthFailed', { error: formatApiError(req, error) }));
     }
   });
 
@@ -352,11 +369,18 @@ const createDashboardServer = (client) => {
 
   app.get('/api/me', (req, res) => {
     if (!req.session.user) {
-      res.json({ authenticated: false, user: null });
+      res.json({ authenticated: false, user: null, locale: 'en' });
       return;
     }
 
-    res.json({ authenticated: true, user: req.session.user });
+    if (!req.session.user.locale) {
+      const recoveredLocale = normalizeLocale(req.session.user.discordLocale || req.session.locale || 'en');
+      req.session.user.locale = recoveredLocale;
+      req.session.locale = recoveredLocale;
+    }
+
+    const locale = getRequestLocale(req);
+    res.json({ authenticated: true, user: req.session.user, locale });
   });
 
   app.get('/api/session', requireAuth, async (req, res) => {
@@ -364,7 +388,7 @@ const createDashboardServer = (client) => {
       const payload = await buildSessionPayload(req);
       res.json(payload);
     } catch (error) {
-      res.status(500).json({ error: error.message || 'Errore sessione' });
+      res.status(500).json({ error: formatApiError(req, error, 'dashboard.errorSession') });
     }
   });
 
@@ -380,11 +404,11 @@ const createDashboardServer = (client) => {
       const tracks = await client.musicManager.searchTracks(q, { source, limit: 30 });
       res.json({ tracks, source });
     } catch (error) {
-      res.status(500).json({ error: error.message || 'Errore ricerca' });
+      res.status(500).json({ error: formatApiError(req, error, 'dashboard.errorSearch') });
     }
   });
 
-  app.get('/api/discover', requireAuth, async (_req, res) => {
+  app.get('/api/discover', requireAuth, async (req, res) => {
     try {
       const seeds = ['italian rap', 'pop 2026', 'chill mix', 'night drive', 'viral hits', 'dance playlist'];
 
@@ -396,7 +420,7 @@ const createDashboardServer = (client) => {
 
       res.json({ sections });
     } catch (error) {
-      res.status(500).json({ error: error.message || 'Errore discover' });
+      res.status(500).json({ error: formatApiError(req, error, 'dashboard.errorDiscover') });
     }
   });
 
@@ -404,37 +428,41 @@ const createDashboardServer = (client) => {
     const { query } = req.body || {};
 
     if (!query) {
-      res.status(400).json({ error: 'Parametro mancante: query' });
+      res.status(400).json({ error: tr(req, 'dashboard.missingQuery') });
       return;
     }
 
     try {
       const { session, queue } = await requireControllableSession(req);
+      const locale = getRequestLocale(req);
+      client.musicManager.setQueueLocale(queue, locale);
 
       const result = await client.musicManager.enqueueQuery({
         guildId: session.guildId,
         voiceChannelId: queue.voiceChannelId,
         textChannelId: queue.textChannelId,
         query,
-        requestedBy: req.session.user.id
+        requestedBy: req.session.user.id,
+        locale
       });
 
       const payload = await buildSessionPayload(req);
       res.json({ ok: true, result, ...payload });
     } catch (error) {
-      res.status(403).json({ error: error.message || 'Errore play' });
+      res.status(403).json({ error: formatApiError(req, error, 'dashboard.errorPlay') });
     }
   });
 
   app.post('/api/control', requireAuth, async (req, res) => {
     const { action, value } = req.body || {};
     if (!action) {
-      res.status(400).json({ error: 'Parametro mancante: action' });
+      res.status(400).json({ error: tr(req, 'dashboard.missingAction') });
       return;
     }
 
     try {
-      const { session } = await requireControllableSession(req);
+      const { session, queue } = await requireControllableSession(req);
+      client.musicManager.setQueueLocale(queue, getRequestLocale(req));
       const guildId = session.guildId;
 
       if (action === 'pause') await client.musicManager.pause(guildId);
@@ -450,26 +478,27 @@ const createDashboardServer = (client) => {
       else if (action === 'filter') await client.musicManager.applyFilter(guildId, String(value || 'clear'));
       else if (action === 'loop') {
         const mode = parseLoopMode(String(value || ''));
-        if (!mode) throw new Error('Loop mode non valido');
+        if (!mode) throw new Error(tr(req, 'dashboard.invalidLoopMode'));
         await client.musicManager.setLoop(guildId, mode);
       } else {
-        throw new Error('Azione non supportata');
+        throw new Error(tr(req, 'dashboard.unsupportedAction'));
       }
 
       const payload = await buildSessionPayload(req);
       res.json({ ok: true, ...payload });
     } catch (error) {
-      res.status(403).json({ error: error.message || 'Errore control' });
+      res.status(403).json({ error: formatApiError(req, error, 'dashboard.errorControl') });
     }
   });
 
   app.get('/api/lyrics', requireAuth, async (req, res) => {
     try {
+      const locale = getRequestLocale(req);
       const { queue } = await requireSessionQueue(req);
-      const lyrics = await fetchSyncedLyrics(queue.current);
+      const lyrics = await fetchSyncedLyrics(queue.current, locale);
 
       if (!lyrics.syncedLyrics && !lyrics.plainLyrics) {
-        throw new Error('Lyrics non disponibili per questo brano.');
+        throw new Error(t(locale, 'dashboard.lyricsNotAvailableForTrack'));
       }
 
       res.json({
@@ -484,7 +513,7 @@ const createDashboardServer = (client) => {
         plainLyrics: lyrics.plainLyrics
       });
     } catch (error) {
-      res.status(404).json({ error: error.message || 'Lyrics non disponibili' });
+      res.status(404).json({ error: formatApiError(req, error, 'dashboard.errorLyrics') });
     }
   });
 

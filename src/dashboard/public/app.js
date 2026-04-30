@@ -97,8 +97,226 @@ let lyricsLines = [];
 let lyricsTrackKey = null;
 let activeLyricIndex = -1;
 let lyricsRequestSeq = 0;
+let currentLocale = 'en';
 
-const seededChips = ['italian rap', 'trap italia', 'pop hits', 'chill vibes', 'night drive', 'deep house', 'anime opening'];
+const I18N = {
+  en: {
+    errors: {
+      api: 'API request failed.',
+      noSession: 'No active session. Use /join in your Discord voice channel.',
+      botNotInVoice: 'The bot is not in voice. Use /join again on Discord.',
+      sameVoiceRequired: 'You must be in the same voice channel as the bot to use the dashboard.',
+      syncedLyricsUnavailable: 'Synced lyrics are not available for this track.',
+      unavailable: 'Unavailable'
+    },
+    ui: {
+      versionBadge: 'New version',
+      versionTitle: 'TunixBot 1.0.5',
+      versionUpdates: 'What we updated:',
+      versionClose: 'Got it',
+      joinPopupTitle: 'Session not found',
+      joinPopupText: 'Join a voice channel on Discord and run /join. The dashboard will refresh automatically.',
+      lyricsLive: 'Lyrics Live',
+      close: 'Close',
+      effectsTitle: 'Audio Effects',
+      effectsSub: 'Choose a filter to apply to the current player',
+      trackDetails: 'Track Details',
+      trackTitle: 'Title',
+      trackArtist: 'Artist',
+      trackDuration: 'Duration',
+      trackSource: 'Source',
+      trackStatus: 'Status',
+      trackQueuePos: 'Queue position',
+      trackLink: 'Link',
+      logout: 'Logout',
+      sessionTitle: 'Session',
+      sessionServer: 'Server',
+      sessionVoice: 'Bot Voice',
+      sessionText: 'Text Channel',
+      statusReady: 'Ready',
+      discover: 'Discover',
+      discoverSuggested: 'Suggested tracks',
+      resultsTitle: 'Search results',
+      queueTitle: 'Queue',
+      queueClear: 'Clear',
+      effectLabel: 'Effect:',
+      noTrack: 'No track',
+      queueEmpty: 'Queue is empty.',
+      searchPlaceholder: 'What do you want to hear?',
+      search: 'Search',
+      playQuery: 'Play Query',
+      detailsResultContext: 'Search result details',
+      detailsResultStatus: 'Ready for queue',
+      detailsQueueContext: 'Queue item details',
+      detailsQueueStatus: 'Queued',
+      detailsNowContext: 'Now playing details',
+      detailsPaused: 'Paused',
+      detailsPlaying: 'Playing',
+      playNow: 'Play Now',
+      remove: 'Remove'
+    },
+    status: {
+      searching: 'Searching...',
+      foundTracks: 'Found {count} tracks on {source}',
+      queueAdding: 'Adding to queue...',
+      queueAddedAndSkipped: 'Added {added} tracks, skipped {skipped} (not found in audio source)',
+      queueAddedMany: 'Added {added} tracks to queue',
+      queueAddedOne: 'Track added',
+      nextTrack: 'Next track',
+      stopped: 'Playback stopped',
+      shuffled: 'Queue shuffled',
+      loopSet: 'Loop set: {mode}',
+      removedAt: 'Track #{index} removed from queue',
+      jumpingTo: 'Jumping to track #{index}...',
+      queueCleared: 'Queue cleared',
+      effectApplied: 'Effect applied: {effect}',
+      loadingLyrics: 'Loading lyrics...'
+    },
+    buttons: {
+      ariaResume: 'Resume playback',
+      ariaPause: 'Pause playback',
+      toastClose: 'Close notification'
+    },
+    sources: {
+      spotify: 'Spotify',
+      youtube: 'YouTube',
+      external: 'External Link'
+    },
+    connection: {
+      sessionMissing: 'Session not found',
+      sameVoice: 'Join the same voice channel',
+      ready: 'Connected and ready'
+    },
+    versionList: [
+      'Improved Spotify/YouTube source search',
+      'Lyrics sync improved',
+      'Queue management improved (play index, remove, clear)',
+      'Smart autoplay: when queue ends, a similar track starts automatically'
+    ],
+    chips: ['italian rap', 'italian trap', 'pop hits', 'chill vibes', 'night drive', 'deep house', 'anime opening']
+  },
+  it: {
+    errors: {
+      api: 'Errore API',
+      noSession: 'Nessuna sessione attiva. Usa /join su Discord nel canale vocale.',
+      botNotInVoice: 'Il bot non e in vocale. Rifai /join su Discord.',
+      sameVoiceRequired: 'Devi essere nello stesso canale vocale del bot per usare la dashboard.',
+      syncedLyricsUnavailable: 'Lyrics sincronizzate non disponibili per questo brano.',
+      unavailable: 'Non disponibile'
+    },
+    ui: {
+      versionBadge: 'Nuova versione',
+      versionTitle: 'TunixBot 1.0.5',
+      versionUpdates: 'Abbiamo aggiornato:',
+      versionClose: 'Ho capito',
+      joinPopupTitle: 'Sessione non trovata',
+      joinPopupText: 'Entra in vocale su Discord e usa /join. La dashboard si aggiornera automaticamente.',
+      lyricsLive: 'Lyrics Live',
+      close: 'Chiudi',
+      effectsTitle: 'Effetti Audio',
+      effectsSub: 'Scegli un filtro da applicare al player corrente',
+      trackDetails: 'Dettagli Brano',
+      trackTitle: 'Titolo',
+      trackArtist: 'Artista',
+      trackDuration: 'Durata',
+      trackSource: 'Sorgente',
+      trackStatus: 'Stato',
+      trackQueuePos: 'Posizione coda',
+      trackLink: 'Link',
+      logout: 'Logout',
+      sessionTitle: 'Sessione',
+      sessionServer: 'Server',
+      sessionVoice: 'Vocale Bot',
+      sessionText: 'Canale Testo',
+      statusReady: 'Pronto',
+      discover: 'Scopri',
+      discoverSuggested: 'Brani consigliati',
+      resultsTitle: 'Risultati ricerca',
+      queueTitle: 'Coda',
+      queueClear: 'Svuota',
+      effectLabel: 'Effetto:',
+      noTrack: 'Nessun brano',
+      queueEmpty: 'Coda vuota.',
+      searchPlaceholder: 'Cosa vuoi ascoltare?',
+      search: 'Cerca',
+      playQuery: 'Play Query',
+      detailsResultContext: 'Dettaglio risultato',
+      detailsResultStatus: 'Pronto per la coda',
+      detailsQueueContext: 'Dettaglio dalla coda',
+      detailsQueueStatus: 'In coda',
+      detailsNowContext: 'Dettaglio ora in riproduzione',
+      detailsPaused: 'In pausa',
+      detailsPlaying: 'In riproduzione',
+      playNow: 'Riproduci Ora',
+      remove: 'Rimuovi'
+    },
+    status: {
+      searching: 'Ricerca in corso...',
+      foundTracks: 'Trovate {count} tracce su {source}',
+      queueAdding: 'Aggiunta in coda...',
+      queueAddedAndSkipped: 'Aggiunti {added} brani, saltati {skipped} (non trovati in sorgente audio)',
+      queueAddedMany: 'Aggiunti {added} brani in coda',
+      queueAddedOne: 'Brano aggiunto',
+      nextTrack: 'Brano successivo',
+      stopped: 'Riproduzione fermata',
+      shuffled: 'Coda mischiata',
+      loopSet: 'Loop impostato: {mode}',
+      removedAt: 'Brano #{index} rimosso dalla coda',
+      jumpingTo: 'Passo al brano #{index}...',
+      queueCleared: 'Coda svuotata',
+      effectApplied: 'Effetto applicato: {effect}',
+      loadingLyrics: 'Caricamento lyrics...'
+    },
+    buttons: {
+      ariaResume: 'Riprendi riproduzione',
+      ariaPause: 'Metti in pausa',
+      toastClose: 'Chiudi notifica'
+    },
+    sources: {
+      spotify: 'Spotify',
+      youtube: 'YouTube',
+      external: 'Link esterno'
+    },
+    connection: {
+      sessionMissing: 'Sessione non trovata',
+      sameVoice: 'Entra nella stessa vocale',
+      ready: 'Connesso e pronto'
+    },
+    versionList: [
+      'Ricerca sorgenti Spotify/YouTube migliorata',
+      'Lyrics syncata',
+      'Gestione coda migliorata (play index, remove, clear)',
+      'Autoplay smart: quando la coda finisce parte un brano simile all ultimo'
+    ],
+    chips: ['italian rap', 'trap italia', 'pop hits', 'chill vibes', 'night drive', 'deep house', 'anime opening']
+  }
+};
+
+const normalizeLocale = (value) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'it' || normalized.startsWith('it-')) return 'it';
+  return 'en';
+};
+
+const lookup = (obj, key) =>
+  String(key)
+    .split('.')
+    .reduce((acc, piece) => (acc && Object.prototype.hasOwnProperty.call(acc, piece) ? acc[piece] : undefined), obj);
+
+const interpolate = (template, vars = {}) =>
+  String(template).replace(/\{([a-zA-Z0-9_]+)\}/g, (_m, name) =>
+    Object.prototype.hasOwnProperty.call(vars, name) ? String(vars[name]) : `{${name}}`
+  );
+
+const tr = (key, vars = {}) => {
+  const value = lookup(I18N[currentLocale], key);
+  if (typeof value === 'string') return interpolate(value, vars);
+  const fallback = lookup(I18N.en, key);
+  if (typeof fallback === 'string') return interpolate(fallback, vars);
+  return key;
+};
+
+const seededChips = () => I18N[currentLocale]?.chips || I18N.en.chips;
 
 const normalizePlayableUrl = (value) => {
   const raw = String(value || '').trim();
@@ -133,7 +351,7 @@ const normalizePlayableUrl = (value) => {
 const api = async (url, options = {}) => {
   const res = await fetch(url, options);
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || 'Errore API');
+  if (!res.ok) throw new Error(data.error || tr('errors.api'));
   return data;
 };
 
@@ -150,6 +368,88 @@ const readCookie = (name) => {
 const writeCookie = (name, value, days = 365) => {
   const expires = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toUTCString();
   document.cookie = `${name}=${encodeURIComponent(value)}; expires=${expires}; path=/; SameSite=Lax`;
+};
+
+const setText = (selector, text) => {
+  const el = document.querySelector(selector);
+  if (el) el.textContent = text;
+};
+
+const applyLocale = (locale) => {
+  currentLocale = normalizeLocale(locale);
+  document.documentElement.lang = currentLocale;
+
+  setText('.version-badge', tr('ui.versionBadge'));
+  setText('#versionPopupTitle', tr('ui.versionTitle'));
+  setText('.version-popup-text', tr('ui.versionUpdates'));
+  setText('#versionPopupCloseBtn', tr('ui.versionClose'));
+
+  const versionListEl = document.querySelector('.version-list');
+  if (versionListEl) {
+    versionListEl.innerHTML = '';
+    for (const item of I18N[currentLocale].versionList) {
+      const li = document.createElement('li');
+      li.textContent = item;
+      versionListEl.appendChild(li);
+    }
+  }
+
+  setText('.join-popup-title', tr('ui.joinPopupTitle'));
+  setText('.join-popup-text', tr('ui.joinPopupText'));
+
+  setText('#lyricsPanel .lyrics-title', tr('ui.lyricsLive'));
+  setText('#lyricsCloseBtn', tr('ui.close'));
+  setText('#effectsPanel .lyrics-title', tr('ui.effectsTitle'));
+  setText('#effectsPanel .lyrics-track-label', tr('ui.effectsSub'));
+  setText('#effectsCloseBtn', tr('ui.close'));
+  setText('#trackInfoPanel .lyrics-title', tr('ui.trackDetails'));
+  setText('#trackInfoCloseBtn', tr('ui.close'));
+
+  const infoRows = document.querySelectorAll('#trackInfoPanel .track-info-row span');
+  const labels = [
+    tr('ui.trackTitle'),
+    tr('ui.trackArtist'),
+    tr('ui.trackDuration'),
+    tr('ui.trackSource'),
+    tr('ui.trackStatus'),
+    tr('ui.trackQueuePos'),
+    tr('ui.trackLink')
+  ];
+  infoRows.forEach((row, idx) => {
+    if (labels[idx]) row.textContent = labels[idx];
+  });
+
+  if (logoutBtn) logoutBtn.textContent = tr('ui.logout');
+  if (searchInput) searchInput.placeholder = tr('ui.searchPlaceholder');
+  if (searchBtn) searchBtn.textContent = tr('ui.search');
+  if (playBtn) playBtn.textContent = tr('ui.playQuery');
+  if (clearQueueBtn) clearQueueBtn.textContent = tr('ui.queueClear');
+  document.querySelectorAll('.effect-label').forEach((label) => {
+    const valueEl = label.querySelector('b');
+    if (!valueEl) return;
+    const value = valueEl.textContent;
+    label.textContent = `${tr('ui.effectLabel')} `;
+    const bold = document.createElement('b');
+    bold.textContent = value;
+    label.appendChild(bold);
+  });
+  if (statusPill?.querySelector('.status-text')) statusPill.querySelector('.status-text').textContent = tr('ui.statusReady');
+
+  setText('.left-col .section-title', tr('ui.sessionTitle'));
+  const sessionRows = document.querySelectorAll('.session-row span');
+  if (sessionRows[0]) sessionRows[0].textContent = tr('ui.sessionServer');
+  if (sessionRows[1]) sessionRows[1].textContent = tr('ui.sessionVoice');
+  if (sessionRows[2]) sessionRows[2].textContent = tr('ui.sessionText');
+  setText('.discover-chips .section-title', tr('ui.discover'));
+  setText('#discoverSection .section-head h2', tr('ui.discoverSuggested'));
+  setText('#resultsSection .section-head h2', tr('ui.resultsTitle'));
+  setText('.right-col .queue-head h3', tr('ui.queueTitle'));
+
+  for (const btn of sourceOptionButtons) {
+    const key = btn.dataset.sourceOption === 'youtube' ? 'sources.youtube' : 'sources.spotify';
+    const label = btn.querySelector('span');
+    if (label) label.textContent = tr(key);
+  }
 };
 
 const spawnVersionConfetti = () => {
@@ -197,7 +497,10 @@ const setConnectionStatus = (text, isError = false) => {
   }
 
   const normalized = message.toLowerCase();
-  if (normalized.includes('connesso e pronto') || normalized === 'pronto') {
+  if (
+    normalized.includes(tr('connection.ready').toLowerCase()) ||
+    normalized === tr('ui.statusReady').toLowerCase()
+  ) {
     statusPill.classList.add('status-ok');
   } else {
     statusPill.classList.add('status-info');
@@ -214,7 +517,7 @@ const showToast = (text, type = 'info') => {
   toast.innerHTML = `
     <div class="toast-mark" aria-hidden="true"></div>
     <div class="toast-message"></div>
-    <button class="toast-close" type="button" aria-label="Chiudi notifica">x</button>
+    <button class="toast-close" type="button" aria-label="${tr('buttons.toastClose')}">x</button>
   `;
 
   toast.querySelector('.toast-message').textContent = message;
@@ -237,7 +540,7 @@ const setPlayPauseVisual = (button, paused = true) => {
   if (!button) return;
   button.classList.toggle('is-paused', paused);
   button.classList.toggle('is-playing', !paused);
-  button.setAttribute('aria-label', paused ? 'Riprendi riproduzione' : 'Metti in pausa');
+  button.setAttribute('aria-label', paused ? tr('buttons.ariaResume') : tr('buttons.ariaPause'));
 };
 
 const updateSourceBadge = () => {
@@ -281,10 +584,10 @@ const inferTrackSource = (url) => {
   if (!url) return '-';
   try {
     const host = new URL(url).hostname.toLowerCase();
-    if (host.includes('spotify')) return 'Spotify';
-    if (host.includes('youtube') || host.includes('youtu.be')) return 'YouTube';
+    if (host.includes('spotify')) return tr('sources.spotify');
+    if (host.includes('youtube') || host.includes('youtu.be')) return tr('sources.youtube');
   } catch {}
-  return 'Link esterno';
+  return tr('sources.external');
 };
 
 const shorten = (text, max = 68) => {
@@ -328,7 +631,7 @@ const showTrackInfo = (track, options = {}) => {
   trackInfoSource.textContent = source;
   trackInfoStatus.textContent = options.status || '-';
   trackInfoQueuePos.textContent = options.queuePosition ? `#${options.queuePosition}` : '-';
-  trackInfoContext.textContent = options.context || 'Dettagli brano';
+  trackInfoContext.textContent = options.context || tr('ui.trackDetails');
 
   trackInfoThumb.src = track.thumbnail || '';
   trackInfoThumb.alt = title !== '-' ? `cover ${title}` : 'cover';
@@ -339,7 +642,7 @@ const showTrackInfo = (track, options = {}) => {
     trackInfoUrl.classList.remove('disabled');
     trackInfoUrl.tabIndex = 0;
   } else {
-    trackInfoUrl.textContent = 'Non disponibile';
+    trackInfoUrl.textContent = tr('errors.unavailable');
     trackInfoUrl.removeAttribute('href');
     trackInfoUrl.classList.add('disabled');
     trackInfoUrl.tabIndex = -1;
@@ -350,13 +653,13 @@ const showTrackInfo = (track, options = {}) => {
 
 const ensureCanControl = () => {
   if (!sessionInfo) {
-    throw new Error('Nessuna sessione attiva. Usa /join su Discord nel canale vocale.');
+    throw new Error(tr('errors.noSession'));
   }
   if (!state?.connected) {
-    throw new Error('Il bot non e in vocale. Rifai /join su Discord.');
+    throw new Error(tr('errors.botNotInVoice'));
   }
   if (!canControl) {
-    throw new Error('Devi essere nello stesso canale vocale del bot per usare la dashboard.');
+    throw new Error(tr('errors.sameVoiceRequired'));
   }
 };
 
@@ -465,7 +768,7 @@ const renderLyricsLines = () => {
   lyricsLinesWrap.innerHTML = '';
 
   if (!lyricsLines.length) {
-    lyricsLinesWrap.innerHTML = '<div class=\"lyric-line\">Lyrics sincronizzate non disponibili per questo brano.</div>';
+    lyricsLinesWrap.innerHTML = `<div class=\"lyric-line\">${tr('errors.syncedLyricsUnavailable')}</div>`;
     return;
   }
 
@@ -522,7 +825,7 @@ const updateLoopButtonLabels = () => {
 
   const applyLoopVisual = (button) => {
     if (!button) return;
-    button.title = `Loop: ${mode}`;
+    button.title = tr('status.loopSet', { mode });
     button.dataset.mode = mode;
     const stateLabel = button.querySelector('.loop-state');
     if (stateLabel) stateLabel.textContent = loopLabel;
@@ -547,7 +850,7 @@ const loadLyricsForCurrentTrack = async () => {
   const requestSeq = ++lyricsRequestSeq;
   activeLyricIndex = -1;
   lyricsLines = [];
-  lyricsLinesWrap.innerHTML = '<div class=\"lyric-line\">Caricamento lyrics...</div>';
+  lyricsLinesWrap.innerHTML = `<div class=\"lyric-line\">${tr('status.loadingLyrics')}</div>`;
   lyricsTrackLabel.textContent = `${state.current.title} • ${state.current.author}`;
 
   const payload = await api('/api/lyrics');
@@ -589,7 +892,7 @@ const renderSessionInfo = (session) => {
 const renderQueue = (queue) => {
   queueList.innerHTML = '';
   if (!queue.length) {
-    queueList.innerHTML = '<div class="queue-author">Coda vuota.</div>';
+    queueList.innerHTML = `<div class=\"queue-author\">${tr('ui.queueEmpty')}</div>`;
     return;
   }
 
@@ -603,8 +906,8 @@ const renderQueue = (queue) => {
         <div class="queue-title">${idx + 1}. ${track.title}</div>
         <div class="queue-author">${track.author} • ${track.durationText}</div>
         <div class="queue-actions">
-          <button class="queue-action-btn" data-queue-action="play_index" data-index="${idx + 1}">Riproduci Ora</button>
-          <button class="queue-action-btn danger" data-queue-action="remove" data-index="${idx + 1}">Rimuovi</button>
+          <button class="queue-action-btn" data-queue-action="play_index" data-index="${idx + 1}">${tr('ui.playNow')}</button>
+          <button class="queue-action-btn danger" data-queue-action="remove" data-index="${idx + 1}">${tr('ui.remove')}</button>
         </div>
       </div>
     `;
@@ -620,7 +923,7 @@ const buildCard = (track) => {
     <div class="song-title">${track.title}</div>
     <div class="song-artist">${track.author}</div>
     <div class="song-meta">${track.durationText || formatDuration(track.duration)}</div>
-    <button>Play</button>
+    <button>${tr('ui.playQuery')}</button>
   `;
 
   card.querySelector('button').addEventListener('click', (event) => {
@@ -630,8 +933,8 @@ const buildCard = (track) => {
 
   card.addEventListener('click', () => {
     showTrackInfo(track, {
-      context: 'Dettaglio risultato',
-      status: 'Pronto per la coda'
+      context: tr('ui.detailsResultContext'),
+      status: tr('ui.detailsResultStatus')
     });
   });
 
@@ -670,10 +973,10 @@ const renderNowPlaying = (s) => {
 
   if (!s.current) {
     npThumb.src = '';
-    npTitle.textContent = 'Nessun brano';
+    npTitle.textContent = tr('ui.noTrack');
     npArtist.textContent = '-';
     lyricsNpThumb.src = '';
-    lyricsNpTitle.textContent = 'Nessun brano';
+    lyricsNpTitle.textContent = tr('ui.noTrack');
     lyricsNpArtist.textContent = '-';
     progressText.textContent = '0:00 / 0:00';
     lyricsProgressText.textContent = '0:00 / 0:00';
@@ -740,6 +1043,7 @@ const loadMe = async () => {
     return null;
   }
 
+  applyLocale(me.locale || me.user?.locale || 'en');
   authGate.classList.add('hidden');
   appRoot.classList.remove('hidden');
 
@@ -751,17 +1055,18 @@ const loadMe = async () => {
 
 const refreshSession = async () => {
   const payload = await api('/api/session');
+  if (payload?.locale) applyLocale(payload.locale);
   canControl = payload.canControl;
   renderSessionInfo(payload.session);
   renderNowPlaying(payload.state);
 
   if (!payload.session) {
     showJoinPopup();
-    setConnectionStatus('Sessione non trovata', true);
+    setConnectionStatus(tr('connection.sessionMissing'), true);
   } else {
     hideJoinPopup();
-    if (!payload.canControl) setConnectionStatus('Entra nella stessa vocale', true);
-    else setConnectionStatus('Connesso e pronto');
+    if (!payload.canControl) setConnectionStatus(tr('connection.sameVoice'), true);
+    else setConnectionStatus(tr('connection.ready'));
   }
 };
 
@@ -780,12 +1085,13 @@ const search = async (query) => {
   }
 
   try {
-    setStatus('Ricerca in corso...');
+    setStatus(tr('status.searching'));
     const source = searchSourceSelect.value || 'spotify';
     const { tracks } = await api(`/api/search?q=${encodeURIComponent(q)}&source=${encodeURIComponent(source)}`);
     renderResults(tracks);
     setViewMode('results');
-    setStatus(`Trovate ${tracks.length} tracce su ${source === 'spotify' ? 'Spotify' : 'YouTube'}`);
+    const sourceLabel = source === 'spotify' ? tr('sources.spotify') : tr('sources.youtube');
+    setStatus(tr('status.foundTracks', { count: tracks.length, source: sourceLabel }));
   } catch (error) {
     setStatus(error.message, true);
   }
@@ -799,7 +1105,7 @@ const loadDiscover = async () => {
 const enqueue = async (query) => {
   try {
     ensureCanControl();
-    setStatus('Aggiunta in coda...');
+    setStatus(tr('status.queueAdding'));
     const payload = await api('/api/play', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -810,11 +1116,11 @@ const enqueue = async (query) => {
     const added = Number(payload?.result?.addedCount || 0);
     const skipped = Number(payload?.result?.skippedCount || 0);
     if (skipped > 0) {
-      setStatus(`Aggiunti ${added} brani, saltati ${skipped} (non trovati in sorgente audio)`);
+      setStatus(tr('status.queueAddedAndSkipped', { added, skipped }));
     } else if (added > 1) {
-      setStatus(`Aggiunti ${added} brani in coda`);
+      setStatus(tr('status.queueAddedMany', { added }));
     } else {
-      setStatus('Brano aggiunto');
+      setStatus(tr('status.queueAddedOne'));
     }
   } catch (error) {
     setStatus(error.message, true);
@@ -842,7 +1148,7 @@ const bootstrap = async () => {
   if (!user) return;
 
   chips.innerHTML = '';
-  for (const label of seededChips) {
+  for (const label of seededChips()) {
     const btn = document.createElement('button');
     btn.className = 'chip';
     btn.textContent = label;
@@ -934,7 +1240,7 @@ effectButtons.forEach((btn) => {
       await control('filter', effect);
       currentEffect.textContent = effect;
       lyricsCurrentEffect.textContent = effect;
-      setStatus(`Effetto applicato: ${effect}`);
+      setStatus(tr('status.effectApplied', { effect }));
     } catch (error) {
       updateEffectSelection(state?.filter || 'clear');
       setStatus(error.message, true);
@@ -954,22 +1260,22 @@ lyricsPlayPauseBtn.addEventListener('click', () => {
 
 lyricsSkipBtn.addEventListener('click', async () => {
   const ok = await control('skip');
-  if (ok) setStatus('Brano successivo');
+  if (ok) setStatus(tr('status.nextTrack'));
 });
 lyricsStopBtn.addEventListener('click', async () => {
   const ok = await control('stop');
-  if (ok) setStatus('Riproduzione fermata');
+  if (ok) setStatus(tr('status.stopped'));
 });
 lyricsShuffleBtn.addEventListener('click', async () => {
   const ok = await control('shuffle');
-  if (ok) setStatus('Coda mischiata');
+  if (ok) setStatus(tr('status.shuffled'));
 });
 
 loopBtn.addEventListener('click', () => {
   const current = state?.loop || 'off';
   const next = loopModes[(loopModes.indexOf(current) + 1) % loopModes.length];
   control('loop', next).then((ok) => {
-    if (ok) setStatus(`Loop impostato: ${next}`);
+    if (ok) setStatus(tr('status.loopSet', { mode: next }));
   });
 });
 
@@ -977,7 +1283,7 @@ lyricsLoopBtn.addEventListener('click', () => {
   const current = state?.loop || 'off';
   const next = loopModes[(loopModes.indexOf(current) + 1) % loopModes.length];
   control('loop', next).then((ok) => {
-    if (ok) setStatus(`Loop impostato: ${next}`);
+    if (ok) setStatus(tr('status.loopSet', { mode: next }));
   });
 });
 
@@ -986,9 +1292,9 @@ document.querySelectorAll('[data-action]').forEach((btn) => {
     const action = btn.dataset.action;
     const ok = await control(action);
     if (!ok) return;
-    if (action === 'shuffle') setStatus('Coda mischiata');
-    if (action === 'skip') setStatus('Brano successivo');
-    if (action === 'stop') setStatus('Riproduzione fermata');
+    if (action === 'shuffle') setStatus(tr('status.shuffled'));
+    if (action === 'skip') setStatus(tr('status.nextTrack'));
+    if (action === 'stop') setStatus(tr('status.stopped'));
   });
 });
 
@@ -1005,8 +1311,8 @@ queueList.addEventListener('click', async (event) => {
     const ok = await control(action, index);
     if (!ok) return;
 
-    if (action === 'remove') setStatus(`Brano #${index} rimosso dalla coda`);
-    if (action === 'play_index') setStatus(`Passo al brano #${index}...`);
+    if (action === 'remove') setStatus(tr('status.removedAt', { index }));
+    if (action === 'play_index') setStatus(tr('status.jumpingTo', { index }));
     return;
   }
 
@@ -1017,15 +1323,15 @@ queueList.addEventListener('click', async (event) => {
   if (!queueIndex || !state?.queue?.[queueIndex - 1]) return;
 
   showTrackInfo(state.queue[queueIndex - 1], {
-    context: 'Dettaglio dalla coda',
-    status: 'In coda',
+    context: tr('ui.detailsQueueContext'),
+    status: tr('ui.detailsQueueStatus'),
     queuePosition: queueIndex
   });
 });
 
 clearQueueBtn?.addEventListener('click', async () => {
   const ok = await control('clear');
-  if (ok) setStatus('Coda svuotata');
+  if (ok) setStatus(tr('status.queueCleared'));
 });
 
 versionPopupCloseBtn?.addEventListener('click', dismissVersionPopup);
@@ -1047,8 +1353,8 @@ document.addEventListener('keydown', (event) => {
 nowPlayingInfoTrigger?.addEventListener('click', () => {
   if (!state?.current) return;
   showTrackInfo(state.current, {
-    context: 'Dettaglio ora in riproduzione',
-    status: state.paused ? 'In pausa' : 'In riproduzione'
+    context: tr('ui.detailsNowContext'),
+    status: state.paused ? tr('ui.detailsPaused') : tr('ui.detailsPlaying')
   });
 });
 

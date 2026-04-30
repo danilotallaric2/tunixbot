@@ -9,10 +9,10 @@ const buildActivities = (client) => {
   const activeSessions = client.musicManager?.queues?.size || 0;
 
   return [
-    { type: ActivityType.Listening, name: '/play su TunixBot' },
-    { type: ActivityType.Watching, name: `${guildCount} server attivi` },
-    { type: ActivityType.Playing, name: `${activeSessions} sessioni musicali` },
-    { type: ActivityType.Listening, name: '/help per tutti i comandi' }
+    { type: ActivityType.Listening, name: '/play on TunixBot' },
+    { type: ActivityType.Watching, name: `${guildCount} active servers` },
+    { type: ActivityType.Playing, name: `${activeSessions} music sessions` },
+    { type: ActivityType.Listening, name: '/help for all commands' }
   ];
 };
 

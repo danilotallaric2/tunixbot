@@ -1,5 +1,7 @@
+const { normalizeLocale } = require('../utils/i18n');
+
 class GuildQueue {
-  constructor({ guildId, textChannelId, voiceChannelId, player, defaultVolume, autoDisconnectMs }) {
+  constructor({ guildId, textChannelId, voiceChannelId, player, defaultVolume, autoDisconnectMs, locale = 'en' }) {
     this.guildId = guildId;
     this.textChannelId = textChannelId;
     this.voiceChannelId = voiceChannelId;
@@ -23,6 +25,7 @@ class GuildQueue {
     this.recentTrackKeys = [];
     this.joinedByUserId = null;
     this.joinedAt = 0;
+    this.locale = normalizeLocale(locale);
 
     this.autoDisconnectMs = autoDisconnectMs;
     this.disconnectTimer = null;
