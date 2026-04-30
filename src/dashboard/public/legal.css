@@ -1,0 +1,190 @@
+:root {
+  --bg: #040812;
+  --bg-soft: #091224;
+  --card: rgba(11, 20, 36, 0.94);
+  --border: rgba(120, 178, 255, 0.28);
+  --text: #eef7ff;
+  --muted: #9cb2d1;
+  --accent: #27d3ff;
+  --accent-soft: #8beeff;
+  --shadow: 0 20px 44px rgba(0, 0, 0, 0.45);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+@font-face {
+  font-family: SpotifyMixUI;
+  src: url('https://encore.scdn.co/fonts/SpotifyMixUI-Regular-cc3b1de388efa4cbca6c75cebc24585e.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: SpotifyMixUI;
+  src: url('https://encore.scdn.co/fonts/SpotifyMixUI-Bold-4264b799009b1db5c491778b1bc8e5b7.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: SpotifyMixUITitle;
+  src: url('https://encore.scdn.co/fonts/SpotifyMixUITitleVariable-8769ccfde3379b7ebcadd9529b49d0cc.woff2') format('woff2');
+  font-style: normal;
+  font-display: swap;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background:
+    radial-gradient(1100px 700px at -10% -18%, rgba(39, 211, 255, 0.2), transparent 55%),
+    radial-gradient(900px 640px at 115% -20%, rgba(110, 197, 255, 0.16), transparent 58%),
+    var(--bg);
+  color: var(--text);
+  font-family: SpotifyMixUI, Inter, system-ui, -apple-system, sans-serif;
+}
+
+.legal-root {
+  width: min(920px, 94vw);
+  margin: 28px auto 40px;
+}
+
+.legal-nav {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.brand-badge {
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  background: linear-gradient(145deg, var(--accent), #1f7fe0);
+  display: grid;
+  place-items: center;
+  font-family: SpotifyMixUITitle, SpotifyMixUI, sans-serif;
+  font-weight: 800;
+  color: #032336;
+}
+
+.brand-title {
+  font-family: SpotifyMixUITitle, SpotifyMixUI, sans-serif;
+  font-size: 1.06rem;
+  font-weight: 800;
+}
+
+.brand-sub {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.nav-links {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.nav-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: #d9edff;
+  background: rgba(10, 18, 33, 0.72);
+  font-size: 0.83rem;
+  font-weight: 700;
+}
+
+.nav-link.active {
+  background: linear-gradient(145deg, #b8f7ff, #5adfff);
+  border-color: rgba(190, 245, 255, 0.95);
+  color: #052c3e;
+}
+
+.legal-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  padding: 22px 22px 12px;
+}
+
+h1 {
+  margin: 0;
+  font-family: SpotifyMixUITitle, SpotifyMixUI, sans-serif;
+  font-size: clamp(1.7rem, 4.6vw, 2.25rem);
+}
+
+.meta {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+section {
+  border-top: 1px solid rgba(128, 188, 255, 0.18);
+  margin-top: 18px;
+  padding-top: 16px;
+}
+
+h2 {
+  margin: 0 0 8px;
+  color: var(--accent-soft);
+  font-family: SpotifyMixUITitle, SpotifyMixUI, sans-serif;
+  font-size: 1.08rem;
+}
+
+p {
+  margin: 0 0 10px;
+  color: #e8f4ff;
+  line-height: 1.6;
+}
+
+ul {
+  margin: 0 0 10px 18px;
+  padding: 0;
+  color: #d8ecff;
+}
+
+li {
+  margin: 0 0 6px;
+  line-height: 1.55;
+}
+
+a {
+  color: var(--accent-soft);
+}
+
+@media (max-width: 680px) {
+  .legal-root {
+    margin-top: 14px;
+  }
+
+  .legal-nav {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .legal-card {
+    padding: 16px 14px 8px;
+  }
+}

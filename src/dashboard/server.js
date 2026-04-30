@@ -386,6 +386,16 @@ const createDashboardServer = (client) => {
     return finalResult;
   };
 
+  const publicDir = path.join(__dirname, 'public');
+
+  app.get('/terms', (_req, res) => {
+    res.sendFile(path.join(publicDir, 'terms.html'));
+  });
+
+  app.get('/privacy', (_req, res) => {
+    res.sendFile(path.join(publicDir, 'privacy.html'));
+  });
+
   client.prefetchDashboardLyrics = async (track) => {
     try {
       if (!track) return;
