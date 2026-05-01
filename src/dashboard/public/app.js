@@ -81,6 +81,7 @@ const ANNOUNCEMENT_VERSION = '1.0.5';
 const ANNOUNCEMENT_COOKIE = 'tunixbot_announcement_dismissed';
 const ACTIVITY_TOKEN_STORAGE_KEY = 'tunixbot_activity_auth';
 const ACTIVITY_TOKEN_QUERY_KEY = 'activity_auth';
+const ACTIVITY_MODE_QUERY_KEY = 'activity';
 // Negative value means "show lyrics earlier than audio".
 const LYRICS_SYNC_DELAY_MS = -1000;
 const SERVER_PROGRESS_BACKWARD_TOLERANCE_MS = 350;
@@ -367,6 +368,18 @@ const api = async (url, options = {}) => {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || tr('errors.api'));
   return data;
+};
+
+const isLikelyDiscordActivityContext = () => {
+  try {
+    if (window.self !== window.top) return true;
+  } catch {
+    return true;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  if (params.get(ACTIVITY_MODE_QUERY_KEY) === '1') return true;
+  return ['frame_id', 'instance_id', 'guild_id', 'channel_id'].some((key) => params.has(key));
 };
 
 const initializeActivityToken = () => {
@@ -1121,10 +1134,17 @@ const renderProgressOnly = () => {
 const loadMe = async () => {
   const me = await api('/api/me');
   if (!me.authenticated) {
+    if (isLikelyDiscordActivityContext()) {
+      sessionStorage.removeItem(ACTIVITY_TOKEN_STORAGE_KEY);
+      activityAuthToken = null;
+      window.location.replace('/activity');
+      return null;
+    }
+
     if (activityAuthToken) {
       sessionStorage.removeItem(ACTIVITY_TOKEN_STORAGE_KEY);
       activityAuthToken = null;
-      window.location.href = '/activity';
+      window.location.replace('/activity');
       return null;
     }
 
