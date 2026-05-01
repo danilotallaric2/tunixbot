@@ -496,6 +496,13 @@ const createDashboardServer = (client) => {
   };
 
   app.get('/auth/discord/login', (req, res) => {
+    const referer = String(req.get('referer') || '');
+    const fromActivity = String(req.query?.activity || '') === '1' || referer.includes('/activity');
+    if (fromActivity) {
+      res.redirect('/activity');
+      return;
+    }
+
     if (!config.discord.clientSecret) {
       res.status(500).send(t('en', 'dashboard.oauthSecretMissing'));
       return;

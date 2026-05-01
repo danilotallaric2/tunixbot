@@ -33,7 +33,14 @@ const api = async (url, options = {}) => {
 };
 
 const isLikelyDiscordActivityContext = () => {
+  try {
+    if (window.self !== window.top) return true;
+  } catch {
+    return true;
+  }
+
   const params = new URLSearchParams(window.location.search);
+  if (params.get('activity') === '1') return true;
   return ['frame_id', 'instance_id', 'guild_id', 'channel_id'].some((key) => params.has(key));
 };
 

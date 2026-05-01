@@ -9,6 +9,7 @@ const versionConfetti = document.getElementById('versionConfetti');
 const userAvatar = document.getElementById('userAvatar');
 const userName = document.getElementById('userName');
 const logoutBtn = document.getElementById('logoutBtn');
+const discordLoginBtn = document.querySelector('.discord-login');
 
 const sessionGuild = document.getElementById('sessionGuild');
 const sessionVoice = document.getElementById('sessionVoice');
@@ -380,6 +381,14 @@ const isLikelyDiscordActivityContext = () => {
   const params = new URLSearchParams(window.location.search);
   if (params.get(ACTIVITY_MODE_QUERY_KEY) === '1') return true;
   return ['frame_id', 'instance_id', 'guild_id', 'channel_id'].some((key) => params.has(key));
+};
+
+const configureAuthGateForActivity = () => {
+  if (!discordLoginBtn) return;
+  if (!isLikelyDiscordActivityContext()) return;
+
+  discordLoginBtn.href = '/activity';
+  discordLoginBtn.textContent = 'Open Activity Login';
 };
 
 const initializeActivityToken = () => {
@@ -1502,6 +1511,7 @@ logoutBtn.addEventListener('click', async () => {
 });
 
 initializeActivityToken();
+configureAuthGateForActivity();
 bootstrap().catch((error) => {
   setStatus(error.message, true);
 });
