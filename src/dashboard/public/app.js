@@ -79,6 +79,8 @@ const nowPlayingInfoTrigger = document.getElementById('nowPlayingInfoTrigger');
 const loopModes = ['off', 'song', 'queue'];
 const ANNOUNCEMENT_VERSION = '1.0.5';
 const ANNOUNCEMENT_COOKIE = 'tunixbot_announcement_dismissed';
+const ACTIVITY_TOKEN_STORAGE_KEY = 'tunixbot_activity_auth';
+const ACTIVITY_TOKEN_QUERY_KEY = 'activity_auth';
 // Negative value means "show lyrics earlier than audio".
 const LYRICS_SYNC_DELAY_MS = -1000;
 const SERVER_PROGRESS_BACKWARD_TOLERANCE_MS = 350;
@@ -98,6 +100,7 @@ let lyricsTrackKey = null;
 let activeLyricIndex = -1;
 let lyricsRequestSeq = 0;
 let currentLocale = 'en';
+let activityAuthToken = null;
 const lyricsCache = new Map();
 const lyricsInflight = new Map();
 const LYRICS_CACHE_MAX_ENTRIES = 80;
@@ -352,10 +355,34 @@ const normalizePlayableUrl = (value) => {
 };
 
 const api = async (url, options = {}) => {
-  const res = await fetch(url, options);
+  const headers = new Headers(options.headers || {});
+  if (activityAuthToken) {
+    headers.set('x-activity-auth', activityAuthToken);
+  }
+
+  const res = await fetch(url, {
+    ...options,
+    headers
+  });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || tr('errors.api'));
   return data;
+};
+
+const initializeActivityToken = () => {
+  const url = new URL(window.location.href);
+  const tokenFromQuery = url.searchParams.get(ACTIVITY_TOKEN_QUERY_KEY);
+
+  if (tokenFromQuery) {
+    activityAuthToken = tokenFromQuery;
+    sessionStorage.setItem(ACTIVITY_TOKEN_STORAGE_KEY, tokenFromQuery);
+    url.searchParams.delete(ACTIVITY_TOKEN_QUERY_KEY);
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+    return;
+  }
+
+  const stored = sessionStorage.getItem(ACTIVITY_TOKEN_STORAGE_KEY);
+  if (stored) activityAuthToken = stored;
 };
 
 const readCookie = (name) => {
@@ -1094,6 +1121,13 @@ const renderProgressOnly = () => {
 const loadMe = async () => {
   const me = await api('/api/me');
   if (!me.authenticated) {
+    if (activityAuthToken) {
+      sessionStorage.removeItem(ACTIVITY_TOKEN_STORAGE_KEY);
+      activityAuthToken = null;
+      window.location.href = '/activity';
+      return null;
+    }
+
     authGate.classList.remove('hidden');
     appRoot.classList.add('hidden');
     hideJoinPopup();
@@ -1436,10 +1470,18 @@ volumeRange.addEventListener('change', () => {
 });
 
 logoutBtn.addEventListener('click', async () => {
+  if (activityAuthToken) {
+    sessionStorage.removeItem(ACTIVITY_TOKEN_STORAGE_KEY);
+    activityAuthToken = null;
+    window.location.href = '/activity';
+    return;
+  }
+
   await api('/auth/logout', { method: 'POST' });
   location.reload();
 });
 
+initializeActivityToken();
 bootstrap().catch((error) => {
   setStatus(error.message, true);
 });

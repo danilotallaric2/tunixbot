@@ -14,6 +14,7 @@ const LRCLIB_API = 'https://lrclib.net/api/get';
 const LYRICS_CACHE_MAX_ENTRIES = 500;
 const LYRICS_CACHE_SUCCESS_TTL_MS = 1000 * 60 * 60 * 12;
 const LYRICS_CACHE_NOT_FOUND_TTL_MS = 1000 * 60 * 10;
+const ACTIVITY_AUTH_HEADER = 'x-activity-auth';
 
 const parseLoopMode = (value) => {
   if (!value) return null;
@@ -67,6 +68,60 @@ const getSessionSecret = () => {
 };
 
 const sessionSecret = getSessionSecret();
+
+const base64UrlEncode = (input) => Buffer.from(String(input)).toString('base64url');
+const base64UrlDecode = (input) => Buffer.from(String(input), 'base64url').toString('utf8');
+
+const signActivityPayload = (payloadB64) => crypto.createHmac('sha256', sessionSecret).update(payloadB64).digest('base64url');
+
+const buildActivityAuthToken = (user, locale) => {
+  const now = Date.now();
+  const payload = {
+    v: 1,
+    iat: now,
+    exp: now + SESSION_MAX_AGE_MS,
+    locale: normalizeLocale(locale || user?.locale || 'en'),
+    user: {
+      id: user?.id || null,
+      username: user?.username || null,
+      globalName: user?.globalName || user?.username || null,
+      avatar: user?.avatar || null,
+      avatarUrl: user?.avatarUrl || null,
+      guilds: Array.isArray(user?.guilds)
+        ? user.guilds.map((g) => ({ id: String(g.id || ''), name: String(g.name || '') })).filter((g) => g.id)
+        : [],
+      locale: normalizeLocale(user?.locale || locale || 'en'),
+      discordLocale: user?.discordLocale || null
+    }
+  };
+
+  const payloadB64 = base64UrlEncode(JSON.stringify(payload));
+  const signature = signActivityPayload(payloadB64);
+  return `${payloadB64}.${signature}`;
+};
+
+const parseActivityAuthToken = (token) => {
+  try {
+    if (!token || typeof token !== 'string') return null;
+    const [payloadB64, signature] = token.split('.');
+    if (!payloadB64 || !signature) return null;
+
+    const expected = signActivityPayload(payloadB64);
+    const sigBuffer = Buffer.from(signature);
+    const expectedBuffer = Buffer.from(expected);
+    if (sigBuffer.length !== expectedBuffer.length) return null;
+    if (!crypto.timingSafeEqual(sigBuffer, expectedBuffer)) return null;
+
+    const parsed = JSON.parse(base64UrlDecode(payloadB64));
+    if (!parsed || typeof parsed !== 'object') return null;
+    if (!parsed.user?.id) return null;
+    if (Number(parsed.exp || 0) <= Date.now()) return null;
+
+    return parsed;
+  } catch {
+    return null;
+  }
+};
 
 const buildUserAvatar = (user) => {
   if (!user?.avatar) return null;
@@ -147,6 +202,23 @@ const createDashboardServer = (client) => {
     })
   );
 
+  app.use((req, _res, next) => {
+    if (req.session?.user) return next();
+
+    const headerToken = req.get(ACTIVITY_AUTH_HEADER);
+    const queryToken = typeof req.query?.activity_auth === 'string' ? req.query.activity_auth : null;
+    const token = headerToken || queryToken;
+    if (!token) return next();
+
+    const parsed = parseActivityAuthToken(token);
+    if (!parsed?.user?.id) return next();
+
+    req.session.user = parsed.user;
+    req.session.locale = normalizeLocale(parsed.locale || parsed.user.locale || 'en');
+    req.activityAuthToken = token;
+    return next();
+  });
+
   const requireAuth = (req, res, next) => {
     if (!req.session.user) {
       res.status(401).json({ error: tr(req, 'dashboard.loginRequired') });
@@ -155,13 +227,13 @@ const createDashboardServer = (client) => {
     next();
   };
 
-  const fetchDiscordToken = async (code) => {
+  const fetchDiscordToken = async (code, redirectUri = config.discord.redirectUri) => {
     const body = new URLSearchParams({
       client_id: config.discord.clientId,
       client_secret: config.discord.clientSecret,
       grant_type: 'authorization_code',
       code,
-      redirect_uri: config.discord.redirectUri
+      redirect_uri: redirectUri
     });
 
     const response = await fetch(`${DISCORD_API}/oauth2/token`, {
@@ -192,6 +264,20 @@ const createDashboardServer = (client) => {
     const guilds = await guildRes.json();
 
     return { user, guilds };
+  };
+
+  const mapDiscordProfileToSessionUser = (profile) => {
+    const userLocale = normalizeLocale(profile.user?.locale || 'en');
+    return {
+      id: profile.user.id,
+      username: profile.user.username,
+      globalName: profile.user.global_name || profile.user.username,
+      avatar: profile.user.avatar,
+      avatarUrl: buildUserAvatar(profile.user),
+      guilds: (profile.guilds || []).map((g) => ({ id: g.id, name: g.name })),
+      locale: userLocale,
+      discordLocale: profile.user?.locale || null
+    };
   };
 
   const hasGuildAccess = (req, guildId) => {
@@ -396,6 +482,10 @@ const createDashboardServer = (client) => {
     res.sendFile(path.join(publicDir, 'privacy.html'));
   });
 
+  app.get('/activity', (_req, res) => {
+    res.sendFile(path.join(publicDir, 'activity.html'));
+  });
+
   client.prefetchDashboardLyrics = async (track) => {
     try {
       if (!track) return;
@@ -439,19 +529,8 @@ const createDashboardServer = (client) => {
 
       const token = await fetchDiscordToken(String(req.query.code));
       const profile = await fetchDiscordProfile(token.access_token);
-      const userLocale = normalizeLocale(profile.user?.locale || 'en');
-
-      req.session.user = {
-        id: profile.user.id,
-        username: profile.user.username,
-        globalName: profile.user.global_name || profile.user.username,
-        avatar: profile.user.avatar,
-        avatarUrl: buildUserAvatar(profile.user),
-        guilds: profile.guilds.map((g) => ({ id: g.id, name: g.name })),
-        locale: userLocale,
-        discordLocale: profile.user?.locale || null
-      };
-      req.session.locale = userLocale;
+      req.session.user = mapDiscordProfileToSessionUser(profile);
+      req.session.locale = req.session.user.locale;
 
       delete req.session.oauthState;
       res.redirect('/');
@@ -462,9 +541,49 @@ const createDashboardServer = (client) => {
     }
   });
 
+  app.post('/api/activity/auth', async (req, res) => {
+    try {
+      if (!config.discord.clientSecret) {
+        throw new Error(t('en', 'dashboard.oauthSecretMissing'));
+      }
+
+      const code = String(req.body?.code || '').trim();
+      if (!code) {
+        res.status(400).json({ error: tr(req, 'dashboard.oauthIncomplete') });
+        return;
+      }
+
+      const token = await fetchDiscordToken(code, config.discord.activityRedirectUri);
+      const profile = await fetchDiscordProfile(token.access_token);
+      const user = mapDiscordProfileToSessionUser(profile);
+
+      req.session.user = user;
+      req.session.locale = user.locale;
+
+      const activityAuthToken = buildActivityAuthToken(user, user.locale);
+      res.json({
+        ok: true,
+        token: activityAuthToken,
+        user,
+        locale: user.locale
+      });
+    } catch (error) {
+      logger.error('Activity OAuth failed', error);
+      res.status(500).json({ error: formatApiError(req, error, 'dashboard.oauthFailed') });
+    }
+  });
+
   app.post('/auth/logout', (req, res) => {
     req.session.destroy(() => {
       res.json({ ok: true });
+    });
+  });
+
+  app.get('/api/activity/config', (_req, res) => {
+    res.json({
+      clientId: config.discord.clientId,
+      redirectUri: config.discord.activityRedirectUri,
+      dashboardUrl: config.dashboard.publicUrl || '/'
     });
   });
 
@@ -622,9 +741,24 @@ const createDashboardServer = (client) => {
     }
   });
 
+  app.use(
+    '/vendor/embedded-app-sdk',
+    express.static(path.join(__dirname, '..', '..', 'node_modules', '@discord', 'embedded-app-sdk', 'output'))
+  );
   app.use(express.static(path.join(__dirname, 'public')));
 
-  app.get('*', (_req, res) => {
+  app.get('*', (req, res) => {
+    const isActivityLaunch =
+      typeof req.query?.frame_id === 'string' ||
+      typeof req.query?.instance_id === 'string' ||
+      typeof req.query?.channel_id === 'string' ||
+      typeof req.query?.guild_id === 'string';
+
+    if (isActivityLaunch) {
+      res.sendFile(path.join(__dirname, 'public', 'activity.html'));
+      return;
+    }
+
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
   });
 
