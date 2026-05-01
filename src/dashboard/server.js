@@ -485,10 +485,11 @@ const createDashboardServer = (client) => {
   app.get('/activity', (req, res) => {
     const frameId = String(req.query?.frame_id || '').trim();
     const instanceId = String(req.query?.instance_id || '').trim();
+    const platform = String(req.query?.platform || '').trim();
     const guildId = String(req.query?.guild_id || '').trim();
     const channelId = String(req.query?.channel_id || '').trim();
     logger.info(
-      `Activity page hit: frame_id=${frameId ? 'yes' : 'no'} instance_id=${instanceId ? 'yes' : 'no'} guild_id=${guildId ? 'yes' : 'no'} channel_id=${channelId ? 'yes' : 'no'}`
+      `Activity page hit: frame_id=${frameId ? 'yes' : 'no'} instance_id=${instanceId ? 'yes' : 'no'} platform=${platform || 'no'} guild_id=${guildId ? 'yes' : 'no'} channel_id=${channelId ? 'yes' : 'no'}`
     );
     res.sendFile(path.join(publicDir, 'activity.html'));
   });
@@ -505,6 +506,7 @@ const createDashboardServer = (client) => {
   app.get('/auth/discord/login', (req, res) => {
     const frameId = String(req.query?.frame_id || '').trim();
     const instanceId = String(req.query?.instance_id || '').trim();
+    const platform = String(req.query?.platform || '').trim();
     const guildId = String(req.query?.guild_id || '').trim();
     const channelId = String(req.query?.channel_id || '').trim();
     const launchId = String(req.query?.launch_id || '').trim();
@@ -524,6 +526,7 @@ const createDashboardServer = (client) => {
       const params = new URLSearchParams();
       if (frameId) params.set('frame_id', frameId);
       if (instanceId) params.set('instance_id', instanceId);
+      if (platform) params.set('platform', platform);
       if (guildId) params.set('guild_id', guildId);
       if (channelId) params.set('channel_id', channelId);
       if (launchId) params.set('launch_id', launchId);

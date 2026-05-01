@@ -83,6 +83,18 @@ const ANNOUNCEMENT_COOKIE = 'tunixbot_announcement_dismissed';
 const ACTIVITY_TOKEN_STORAGE_KEY = 'tunixbot_activity_auth';
 const ACTIVITY_TOKEN_QUERY_KEY = 'activity_auth';
 const ACTIVITY_MODE_QUERY_KEY = 'activity';
+const ACTIVITY_LAUNCH_KEYS = [
+  'frame_id',
+  'instance_id',
+  'platform',
+  'guild_id',
+  'channel_id',
+  'launch_id',
+  'location_id',
+  'mobile_app_version',
+  'custom_id',
+  'referrer_id'
+];
 // Negative value means "show lyrics earlier than audio".
 const LYRICS_SYNC_DELAY_MS = -1000;
 const SERVER_PROGRESS_BACKWARD_TOLERANCE_MS = 350;
@@ -371,27 +383,37 @@ const api = async (url, options = {}) => {
   return data;
 };
 
+const readActivityHashParams = () => {
+  const rawHash = String(window.location.hash || '').replace(/^#/, '');
+  if (!rawHash) return new URLSearchParams();
+
+  const normalized = rawHash.startsWith('?') ? rawHash.slice(1) : rawHash;
+  if (!normalized) return new URLSearchParams();
+
+  const queryIndex = normalized.indexOf('?');
+  const candidate = queryIndex >= 0 ? normalized.slice(queryIndex + 1) : normalized;
+  return new URLSearchParams(candidate);
+};
+
 const getActivityLaunchParam = (key) => {
   const queryParams = new URLSearchParams(window.location.search);
   const queryValue = String(queryParams.get(key) || '').trim();
   if (queryValue) return queryValue;
 
-  const hashRaw = String(window.location.hash || '').replace(/^#/, '').replace(/^\?/, '');
-  if (!hashRaw) return '';
-  const hashParams = new URLSearchParams(hashRaw);
+  const hashParams = readActivityHashParams();
   return String(hashParams.get(key) || '').trim();
 };
 
 const hasActivityLaunchParams = () => {
   const activityMode = getActivityLaunchParam(ACTIVITY_MODE_QUERY_KEY);
   if (activityMode === '1') return true;
-  return ['frame_id', 'instance_id', 'guild_id', 'channel_id'].some((key) => Boolean(getActivityLaunchParam(key)));
+  return ACTIVITY_LAUNCH_KEYS.some((key) => Boolean(getActivityLaunchParam(key)));
 };
 
 const redirectToActivityBootstrap = () => {
   const url = new URL('/activity', window.location.origin);
 
-  for (const key of ['frame_id', 'instance_id', 'guild_id', 'channel_id', 'launch_id']) {
+  for (const key of ACTIVITY_LAUNCH_KEYS) {
     const value = getActivityLaunchParam(key);
     if (value) url.searchParams.set(key, value);
   }

@@ -44,9 +44,49 @@ const api = async (url, options = {}) => {
   return payload;
 };
 
+const ACTIVITY_LAUNCH_KEYS = [
+  'frame_id',
+  'instance_id',
+  'platform',
+  'guild_id',
+  'channel_id',
+  'launch_id',
+  'location_id',
+  'mobile_app_version',
+  'custom_id',
+  'referrer_id'
+];
+
+const readHashParams = () => {
+  const rawHash = String(window.location.hash || '').replace(/^#/, '');
+  if (!rawHash) return new URLSearchParams();
+
+  const normalized = rawHash.startsWith('?') ? rawHash.slice(1) : rawHash;
+  if (!normalized) return new URLSearchParams();
+
+  // Handle both "#?a=b" and "#/path?a=b" patterns.
+  const queryIndex = normalized.indexOf('?');
+  const candidate = queryIndex >= 0 ? normalized.slice(queryIndex + 1) : normalized;
+  return new URLSearchParams(candidate);
+};
+
+const getLaunchParam = (key) => {
+  const queryParams = new URLSearchParams(window.location.search);
+  const queryValue = String(queryParams.get(key) || '').trim();
+  if (queryValue) return queryValue;
+
+  const hashParams = readHashParams();
+  return String(hashParams.get(key) || '').trim();
+};
+
+const inferPlatform = () => {
+  const userAgent = String(navigator.userAgent || '').toLowerCase();
+  const isMobileUa = /iphone|ipad|android|mobile/.test(userAgent);
+  return isMobileUa ? 'mobile' : 'desktop';
+};
+
 const isLikelyDiscordActivityContext = () => {
-  const params = new URLSearchParams(window.location.search);
-  const frameId = String(params.get('frame_id') || '').trim();
+  const frameId = getLaunchParam('frame_id');
   if (frameId.length > 0) return true;
 
   // activity=1 is not enough to start Embedded SDK auth flow:
@@ -60,28 +100,24 @@ const randomHex = (bytes = 16) => {
   return [...array].map((v) => v.toString(16).padStart(2, '0')).join('');
 };
 
-const getLaunchParam = (key) => {
-  const queryParams = new URLSearchParams(window.location.search);
-  const queryValue = String(queryParams.get(key) || '').trim();
-  if (queryValue) return queryValue;
-
-  const hashRaw = String(window.location.hash || '').replace(/^#/, '').replace(/^\?/, '');
-  if (!hashRaw) return '';
-  const hashParams = new URLSearchParams(hashRaw);
-  return String(hashParams.get(key) || '').trim();
-};
-
 const normalizeLaunchParamsToQuery = () => {
-  const keys = ['frame_id', 'instance_id', 'guild_id', 'channel_id', 'launch_id'];
   const current = new URL(window.location.href);
   let changed = false;
 
-  for (const key of keys) {
+  for (const key of ACTIVITY_LAUNCH_KEYS) {
     const currentQueryValue = String(current.searchParams.get(key) || '').trim();
     if (currentQueryValue) continue;
     const fallback = getLaunchParam(key);
     if (!fallback) continue;
     current.searchParams.set(key, fallback);
+    changed = true;
+  }
+
+  const frameId = String(current.searchParams.get('frame_id') || '').trim();
+  const instanceId = String(current.searchParams.get('instance_id') || '').trim();
+  const platform = String(current.searchParams.get('platform') || '').trim().toLowerCase();
+  if (frameId && instanceId && !platform) {
+    current.searchParams.set('platform', inferPlatform());
     changed = true;
   }
 
