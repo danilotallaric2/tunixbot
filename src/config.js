@@ -25,7 +25,6 @@ const config = {
     clientId: process.env.DISCORD_CLIENT_ID,
     clientSecret: process.env.DISCORD_CLIENT_SECRET || null,
     redirectUri: process.env.DISCORD_REDIRECT_URI || buildDefaultOAuthRedirect('/auth/discord/callback'),
-    activityRedirectUri: process.env.DISCORD_ACTIVITY_REDIRECT_URI || 'https://127.0.0.1',
     guildId: process.env.DISCORD_GUILD_ID || null
   },
   lavalink: {

@@ -80,21 +80,6 @@ const nowPlayingInfoTrigger = document.getElementById('nowPlayingInfoTrigger');
 const loopModes = ['off', 'song', 'queue'];
 const ANNOUNCEMENT_VERSION = '1.0.5';
 const ANNOUNCEMENT_COOKIE = 'tunixbot_announcement_dismissed';
-const ACTIVITY_TOKEN_STORAGE_KEY = 'tunixbot_activity_auth';
-const ACTIVITY_TOKEN_QUERY_KEY = 'activity_auth';
-const ACTIVITY_MODE_QUERY_KEY = 'activity';
-const ACTIVITY_LAUNCH_KEYS = [
-  'frame_id',
-  'instance_id',
-  'platform',
-  'guild_id',
-  'channel_id',
-  'launch_id',
-  'location_id',
-  'mobile_app_version',
-  'custom_id',
-  'referrer_id'
-];
 // Negative value means "show lyrics earlier than audio".
 const LYRICS_SYNC_DELAY_MS = -1000;
 const SERVER_PROGRESS_BACKWARD_TOLERANCE_MS = 350;
@@ -114,7 +99,6 @@ let lyricsTrackKey = null;
 let activeLyricIndex = -1;
 let lyricsRequestSeq = 0;
 let currentLocale = 'en';
-let activityAuthToken = null;
 const lyricsCache = new Map();
 const lyricsInflight = new Map();
 const LYRICS_CACHE_MAX_ENTRIES = 80;
@@ -369,82 +353,10 @@ const normalizePlayableUrl = (value) => {
 };
 
 const api = async (url, options = {}) => {
-  const headers = new Headers(options.headers || {});
-  if (activityAuthToken) {
-    headers.set('x-activity-auth', activityAuthToken);
-  }
-
-  const res = await fetch(url, {
-    ...options,
-    headers
-  });
+  const res = await fetch(url, options);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || tr('errors.api'));
   return data;
-};
-
-const readActivityHashParams = () => {
-  const rawHash = String(window.location.hash || '').replace(/^#/, '');
-  if (!rawHash) return new URLSearchParams();
-
-  const normalized = rawHash.startsWith('?') ? rawHash.slice(1) : rawHash;
-  if (!normalized) return new URLSearchParams();
-
-  const queryIndex = normalized.indexOf('?');
-  const candidate = queryIndex >= 0 ? normalized.slice(queryIndex + 1) : normalized;
-  return new URLSearchParams(candidate);
-};
-
-const getActivityLaunchParam = (key) => {
-  const queryParams = new URLSearchParams(window.location.search);
-  const queryValue = String(queryParams.get(key) || '').trim();
-  if (queryValue) return queryValue;
-
-  const hashParams = readActivityHashParams();
-  return String(hashParams.get(key) || '').trim();
-};
-
-const hasActivityLaunchParams = () => {
-  const activityMode = getActivityLaunchParam(ACTIVITY_MODE_QUERY_KEY);
-  if (activityMode === '1') return true;
-  return ACTIVITY_LAUNCH_KEYS.some((key) => Boolean(getActivityLaunchParam(key)));
-};
-
-const redirectToActivityBootstrap = () => {
-  const url = new URL('/activity', window.location.origin);
-
-  for (const key of ACTIVITY_LAUNCH_KEYS) {
-    const value = getActivityLaunchParam(key);
-    if (value) url.searchParams.set(key, value);
-  }
-
-  url.searchParams.set(ACTIVITY_MODE_QUERY_KEY, '1');
-  window.location.replace(url.toString());
-};
-
-const configureAuthGateForActivity = () => {
-  if (!discordLoginBtn) return;
-  if (!hasActivityLaunchParams()) return;
-
-  discordLoginBtn.href = '/activity?activity=1';
-  discordLoginBtn.textContent = 'Open Activity Login';
-  discordLoginBtn.setAttribute('target', '_self');
-};
-
-const initializeActivityToken = () => {
-  const url = new URL(window.location.href);
-  const tokenFromQuery = url.searchParams.get(ACTIVITY_TOKEN_QUERY_KEY);
-
-  if (tokenFromQuery) {
-    activityAuthToken = tokenFromQuery;
-    sessionStorage.setItem(ACTIVITY_TOKEN_STORAGE_KEY, tokenFromQuery);
-    url.searchParams.delete(ACTIVITY_TOKEN_QUERY_KEY);
-    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
-    return;
-  }
-
-  const stored = sessionStorage.getItem(ACTIVITY_TOKEN_STORAGE_KEY);
-  if (stored) activityAuthToken = stored;
 };
 
 const readCookie = (name) => {
@@ -1183,20 +1095,6 @@ const renderProgressOnly = () => {
 const loadMe = async () => {
   const me = await api('/api/me');
   if (!me.authenticated) {
-    if (hasActivityLaunchParams()) {
-      sessionStorage.removeItem(ACTIVITY_TOKEN_STORAGE_KEY);
-      activityAuthToken = null;
-      redirectToActivityBootstrap();
-      return null;
-    }
-
-    if (activityAuthToken) {
-      sessionStorage.removeItem(ACTIVITY_TOKEN_STORAGE_KEY);
-      activityAuthToken = null;
-      window.location.replace('/activity');
-      return null;
-    }
-
     authGate.classList.remove('hidden');
     appRoot.classList.add('hidden');
     hideJoinPopup();
@@ -1539,23 +1437,9 @@ volumeRange.addEventListener('change', () => {
 });
 
 logoutBtn.addEventListener('click', async () => {
-  if (activityAuthToken) {
-    sessionStorage.removeItem(ACTIVITY_TOKEN_STORAGE_KEY);
-    activityAuthToken = null;
-    window.location.href = '/activity';
-    return;
-  }
-
   await api('/auth/logout', { method: 'POST' });
   location.reload();
 });
-
-initializeActivityToken();
-configureAuthGateForActivity();
-
-if (hasActivityLaunchParams() && !activityAuthToken) {
-  redirectToActivityBootstrap();
-}
 
 bootstrap().catch((error) => {
   setStatus(error.message, true);

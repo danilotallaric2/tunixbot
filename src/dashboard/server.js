@@ -14,7 +14,6 @@ const LRCLIB_API = 'https://lrclib.net/api/get';
 const LYRICS_CACHE_MAX_ENTRIES = 500;
 const LYRICS_CACHE_SUCCESS_TTL_MS = 1000 * 60 * 60 * 12;
 const LYRICS_CACHE_NOT_FOUND_TTL_MS = 1000 * 60 * 10;
-const ACTIVITY_AUTH_HEADER = 'x-activity-auth';
 
 const parseLoopMode = (value) => {
   if (!value) return null;
@@ -68,60 +67,6 @@ const getSessionSecret = () => {
 };
 
 const sessionSecret = getSessionSecret();
-
-const base64UrlEncode = (input) => Buffer.from(String(input)).toString('base64url');
-const base64UrlDecode = (input) => Buffer.from(String(input), 'base64url').toString('utf8');
-
-const signActivityPayload = (payloadB64) => crypto.createHmac('sha256', sessionSecret).update(payloadB64).digest('base64url');
-
-const buildActivityAuthToken = (user, locale) => {
-  const now = Date.now();
-  const payload = {
-    v: 1,
-    iat: now,
-    exp: now + SESSION_MAX_AGE_MS,
-    locale: normalizeLocale(locale || user?.locale || 'en'),
-    user: {
-      id: user?.id || null,
-      username: user?.username || null,
-      globalName: user?.globalName || user?.username || null,
-      avatar: user?.avatar || null,
-      avatarUrl: user?.avatarUrl || null,
-      guilds: Array.isArray(user?.guilds)
-        ? user.guilds.map((g) => ({ id: String(g.id || ''), name: String(g.name || '') })).filter((g) => g.id)
-        : [],
-      locale: normalizeLocale(user?.locale || locale || 'en'),
-      discordLocale: user?.discordLocale || null
-    }
-  };
-
-  const payloadB64 = base64UrlEncode(JSON.stringify(payload));
-  const signature = signActivityPayload(payloadB64);
-  return `${payloadB64}.${signature}`;
-};
-
-const parseActivityAuthToken = (token) => {
-  try {
-    if (!token || typeof token !== 'string') return null;
-    const [payloadB64, signature] = token.split('.');
-    if (!payloadB64 || !signature) return null;
-
-    const expected = signActivityPayload(payloadB64);
-    const sigBuffer = Buffer.from(signature);
-    const expectedBuffer = Buffer.from(expected);
-    if (sigBuffer.length !== expectedBuffer.length) return null;
-    if (!crypto.timingSafeEqual(sigBuffer, expectedBuffer)) return null;
-
-    const parsed = JSON.parse(base64UrlDecode(payloadB64));
-    if (!parsed || typeof parsed !== 'object') return null;
-    if (!parsed.user?.id) return null;
-    if (Number(parsed.exp || 0) <= Date.now()) return null;
-
-    return parsed;
-  } catch {
-    return null;
-  }
-};
 
 const buildUserAvatar = (user) => {
   if (!user?.avatar) return null;
@@ -201,23 +146,6 @@ const createDashboardServer = (client) => {
       }
     })
   );
-
-  app.use((req, _res, next) => {
-    if (req.session?.user) return next();
-
-    const headerToken = req.get(ACTIVITY_AUTH_HEADER);
-    const queryToken = typeof req.query?.activity_auth === 'string' ? req.query.activity_auth : null;
-    const token = headerToken || queryToken;
-    if (!token) return next();
-
-    const parsed = parseActivityAuthToken(token);
-    if (!parsed?.user?.id) return next();
-
-    req.session.user = parsed.user;
-    req.session.locale = normalizeLocale(parsed.locale || parsed.user.locale || 'en');
-    req.activityAuthToken = token;
-    return next();
-  });
 
   const requireAuth = (req, res, next) => {
     if (!req.session.user) {
@@ -482,18 +410,6 @@ const createDashboardServer = (client) => {
     res.sendFile(path.join(publicDir, 'privacy.html'));
   });
 
-  app.get('/activity', (req, res) => {
-    const frameId = String(req.query?.frame_id || '').trim();
-    const instanceId = String(req.query?.instance_id || '').trim();
-    const platform = String(req.query?.platform || '').trim();
-    const guildId = String(req.query?.guild_id || '').trim();
-    const channelId = String(req.query?.channel_id || '').trim();
-    logger.info(
-      `Activity page hit: frame_id=${frameId ? 'yes' : 'no'} instance_id=${instanceId ? 'yes' : 'no'} platform=${platform || 'no'} guild_id=${guildId ? 'yes' : 'no'} channel_id=${channelId ? 'yes' : 'no'}`
-    );
-    res.sendFile(path.join(publicDir, 'activity.html'));
-  });
-
   client.prefetchDashboardLyrics = async (track) => {
     try {
       if (!track) return;
@@ -504,37 +420,6 @@ const createDashboardServer = (client) => {
   };
 
   app.get('/auth/discord/login', (req, res) => {
-    const frameId = String(req.query?.frame_id || '').trim();
-    const instanceId = String(req.query?.instance_id || '').trim();
-    const platform = String(req.query?.platform || '').trim();
-    const guildId = String(req.query?.guild_id || '').trim();
-    const channelId = String(req.query?.channel_id || '').trim();
-    const launchId = String(req.query?.launch_id || '').trim();
-    const referer = String(req.get('referer') || '');
-    const secFetchDest = String(req.get('sec-fetch-dest') || '').toLowerCase();
-    const userAgent = String(req.get('user-agent') || '').toLowerCase();
-    const fromActivity =
-      String(req.query?.activity || '') === '1' ||
-      frameId.length > 0 ||
-      instanceId.length > 0 ||
-      guildId.length > 0 ||
-      channelId.length > 0 ||
-      referer.includes('/activity') ||
-      secFetchDest === 'iframe' ||
-      userAgent.includes('discord');
-    if (fromActivity) {
-      const params = new URLSearchParams();
-      if (frameId) params.set('frame_id', frameId);
-      if (instanceId) params.set('instance_id', instanceId);
-      if (platform) params.set('platform', platform);
-      if (guildId) params.set('guild_id', guildId);
-      if (channelId) params.set('channel_id', channelId);
-      if (launchId) params.set('launch_id', launchId);
-      params.set('activity', '1');
-      res.redirect(`/activity?${params.toString()}`);
-      return;
-    }
-
     if (!config.discord.clientSecret) {
       res.status(500).send(t('en', 'dashboard.oauthSecretMissing'));
       return;
@@ -580,49 +465,9 @@ const createDashboardServer = (client) => {
     }
   });
 
-  app.post('/api/activity/auth', async (req, res) => {
-    try {
-      if (!config.discord.clientSecret) {
-        throw new Error(t('en', 'dashboard.oauthSecretMissing'));
-      }
-
-      const code = String(req.body?.code || '').trim();
-      if (!code) {
-        res.status(400).json({ error: tr(req, 'dashboard.oauthIncomplete') });
-        return;
-      }
-
-      const token = await fetchDiscordToken(code, config.discord.activityRedirectUri);
-      const profile = await fetchDiscordProfile(token.access_token);
-      const user = mapDiscordProfileToSessionUser(profile);
-
-      req.session.user = user;
-      req.session.locale = user.locale;
-
-      const activityAuthToken = buildActivityAuthToken(user, user.locale);
-      res.json({
-        ok: true,
-        token: activityAuthToken,
-        user,
-        locale: user.locale
-      });
-    } catch (error) {
-      logger.error('Activity OAuth failed', error);
-      res.status(500).json({ error: formatApiError(req, error, 'dashboard.oauthFailed') });
-    }
-  });
-
   app.post('/auth/logout', (req, res) => {
     req.session.destroy(() => {
       res.json({ ok: true });
-    });
-  });
-
-  app.get('/api/activity/config', (_req, res) => {
-    res.json({
-      clientId: config.discord.clientId,
-      redirectUri: config.discord.activityRedirectUri,
-      dashboardUrl: config.dashboard.publicUrl || '/'
     });
   });
 
@@ -780,24 +625,9 @@ const createDashboardServer = (client) => {
     }
   });
 
-  app.use(
-    '/vendor/embedded-app-sdk',
-    express.static(path.join(__dirname, '..', '..', 'node_modules', '@discord', 'embedded-app-sdk', 'output'))
-  );
   app.use(express.static(path.join(__dirname, 'public')));
 
-  app.get('*', (req, res) => {
-    const isActivityLaunch =
-      typeof req.query?.frame_id === 'string' ||
-      typeof req.query?.instance_id === 'string' ||
-      typeof req.query?.channel_id === 'string' ||
-      typeof req.query?.guild_id === 'string';
-
-    if (isActivityLaunch) {
-      res.sendFile(path.join(__dirname, 'public', 'activity.html'));
-      return;
-    }
-
+  app.get('*', (_req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
   });
 
