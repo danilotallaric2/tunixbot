@@ -1513,8 +1513,7 @@ clearQueueBtn?.addEventListener('click', async () => {
 });
 
 playlistLoadCancelBtn?.addEventListener('click', async () => {
-  const ok = await control('cancel_playlist_load');
-  if (ok) setStatus(tr('status.playlistLoadingCancelled'));
+  await control('cancel_playlist_load');
 });
 
 versionPopupCloseBtn?.addEventListener('click', dismissVersionPopup);
