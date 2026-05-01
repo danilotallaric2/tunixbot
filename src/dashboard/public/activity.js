@@ -60,6 +60,35 @@ const randomHex = (bytes = 16) => {
   return [...array].map((v) => v.toString(16).padStart(2, '0')).join('');
 };
 
+const getLaunchParam = (key) => {
+  const queryParams = new URLSearchParams(window.location.search);
+  const queryValue = String(queryParams.get(key) || '').trim();
+  if (queryValue) return queryValue;
+
+  const hashRaw = String(window.location.hash || '').replace(/^#/, '').replace(/^\?/, '');
+  if (!hashRaw) return '';
+  const hashParams = new URLSearchParams(hashRaw);
+  return String(hashParams.get(key) || '').trim();
+};
+
+const normalizeLaunchParamsToQuery = () => {
+  const keys = ['frame_id', 'instance_id', 'guild_id', 'channel_id', 'launch_id'];
+  const current = new URL(window.location.href);
+  let changed = false;
+
+  for (const key of keys) {
+    const currentQueryValue = String(current.searchParams.get(key) || '').trim();
+    if (currentQueryValue) continue;
+    const fallback = getLaunchParam(key);
+    if (!fallback) continue;
+    current.searchParams.set(key, fallback);
+    changed = true;
+  }
+
+  if (!changed) return;
+  window.history.replaceState({}, '', `${current.pathname}${current.search}${current.hash}`);
+};
+
 const redirectToDashboard = (token) => {
   if (token) {
     sessionStorage.setItem(ACTIVITY_TOKEN_STORAGE_KEY, token);
@@ -73,6 +102,7 @@ const redirectToDashboard = (token) => {
 };
 
 const launch = async () => {
+  normalizeLaunchParamsToQuery();
   setRetryVisible(false);
   setStatus('Loading configuration...');
 

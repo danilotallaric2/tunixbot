@@ -371,21 +371,28 @@ const api = async (url, options = {}) => {
   return data;
 };
 
+const getActivityLaunchParam = (key) => {
+  const queryParams = new URLSearchParams(window.location.search);
+  const queryValue = String(queryParams.get(key) || '').trim();
+  if (queryValue) return queryValue;
+
+  const hashRaw = String(window.location.hash || '').replace(/^#/, '').replace(/^\?/, '');
+  if (!hashRaw) return '';
+  const hashParams = new URLSearchParams(hashRaw);
+  return String(hashParams.get(key) || '').trim();
+};
+
 const hasActivityLaunchParams = () => {
-  const params = new URLSearchParams(window.location.search);
-  if (params.get(ACTIVITY_MODE_QUERY_KEY) === '1') return true;
-  return ['frame_id', 'instance_id', 'guild_id', 'channel_id'].some((key) => {
-    const value = String(params.get(key) || '').trim();
-    return value.length > 0;
-  });
+  const activityMode = getActivityLaunchParam(ACTIVITY_MODE_QUERY_KEY);
+  if (activityMode === '1') return true;
+  return ['frame_id', 'instance_id', 'guild_id', 'channel_id'].some((key) => Boolean(getActivityLaunchParam(key)));
 };
 
 const redirectToActivityBootstrap = () => {
-  const current = new URL(window.location.href);
   const url = new URL('/activity', window.location.origin);
 
   for (const key of ['frame_id', 'instance_id', 'guild_id', 'channel_id', 'launch_id']) {
-    const value = current.searchParams.get(key);
+    const value = getActivityLaunchParam(key);
     if (value) url.searchParams.set(key, value);
   }
 

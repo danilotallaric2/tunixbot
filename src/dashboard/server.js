@@ -482,7 +482,14 @@ const createDashboardServer = (client) => {
     res.sendFile(path.join(publicDir, 'privacy.html'));
   });
 
-  app.get('/activity', (_req, res) => {
+  app.get('/activity', (req, res) => {
+    const frameId = String(req.query?.frame_id || '').trim();
+    const instanceId = String(req.query?.instance_id || '').trim();
+    const guildId = String(req.query?.guild_id || '').trim();
+    const channelId = String(req.query?.channel_id || '').trim();
+    logger.info(
+      `Activity page hit: frame_id=${frameId ? 'yes' : 'no'} instance_id=${instanceId ? 'yes' : 'no'} guild_id=${guildId ? 'yes' : 'no'} channel_id=${channelId ? 'yes' : 'no'}`
+    );
     res.sendFile(path.join(publicDir, 'activity.html'));
   });
 
