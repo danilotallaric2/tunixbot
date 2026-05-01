@@ -45,15 +45,13 @@ const api = async (url, options = {}) => {
 };
 
 const isLikelyDiscordActivityContext = () => {
-  try {
-    if (window.self !== window.top) return true;
-  } catch {
-    return true;
-  }
-
   const params = new URLSearchParams(window.location.search);
-  if (params.get('activity') === '1') return true;
-  return ['frame_id', 'instance_id', 'guild_id', 'channel_id'].some((key) => params.has(key));
+  const frameId = String(params.get('frame_id') || '').trim();
+  if (frameId.length > 0) return true;
+
+  // activity=1 is not enough to start Embedded SDK auth flow:
+  // DiscordSDK requires frame_id from a real Discord Activity launch URL.
+  return false;
 };
 
 const randomHex = (bytes = 16) => {
@@ -82,7 +80,7 @@ const launch = async () => {
   setDashboardLink(config.dashboardUrl || '/');
 
   if (!isLikelyDiscordActivityContext()) {
-    setStatus('Not running inside Discord Activity. Opened web dashboard mode.', 'error');
+    setStatus('This page must be opened from Discord Activity (missing frame_id).', 'error');
     return;
   }
 

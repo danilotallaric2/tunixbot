@@ -496,16 +496,32 @@ const createDashboardServer = (client) => {
   };
 
   app.get('/auth/discord/login', (req, res) => {
+    const frameId = String(req.query?.frame_id || '').trim();
+    const instanceId = String(req.query?.instance_id || '').trim();
+    const guildId = String(req.query?.guild_id || '').trim();
+    const channelId = String(req.query?.channel_id || '').trim();
+    const launchId = String(req.query?.launch_id || '').trim();
     const referer = String(req.get('referer') || '');
     const secFetchDest = String(req.get('sec-fetch-dest') || '').toLowerCase();
     const userAgent = String(req.get('user-agent') || '').toLowerCase();
     const fromActivity =
       String(req.query?.activity || '') === '1' ||
+      frameId.length > 0 ||
+      instanceId.length > 0 ||
+      guildId.length > 0 ||
+      channelId.length > 0 ||
       referer.includes('/activity') ||
       secFetchDest === 'iframe' ||
       userAgent.includes('discord');
     if (fromActivity) {
-      res.redirect('/activity');
+      const params = new URLSearchParams();
+      if (frameId) params.set('frame_id', frameId);
+      if (instanceId) params.set('instance_id', instanceId);
+      if (guildId) params.set('guild_id', guildId);
+      if (channelId) params.set('channel_id', channelId);
+      if (launchId) params.set('launch_id', launchId);
+      params.set('activity', '1');
+      res.redirect(`/activity?${params.toString()}`);
       return;
     }
 

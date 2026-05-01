@@ -371,23 +371,33 @@ const api = async (url, options = {}) => {
   return data;
 };
 
-const isLikelyDiscordActivityContext = () => {
-  try {
-    if (window.self !== window.top) return true;
-  } catch {
-    return true;
-  }
-
+const hasActivityLaunchParams = () => {
   const params = new URLSearchParams(window.location.search);
   if (params.get(ACTIVITY_MODE_QUERY_KEY) === '1') return true;
-  return ['frame_id', 'instance_id', 'guild_id', 'channel_id'].some((key) => params.has(key));
+  return ['frame_id', 'instance_id', 'guild_id', 'channel_id'].some((key) => {
+    const value = String(params.get(key) || '').trim();
+    return value.length > 0;
+  });
+};
+
+const redirectToActivityBootstrap = () => {
+  const current = new URL(window.location.href);
+  const url = new URL('/activity', window.location.origin);
+
+  for (const key of ['frame_id', 'instance_id', 'guild_id', 'channel_id', 'launch_id']) {
+    const value = current.searchParams.get(key);
+    if (value) url.searchParams.set(key, value);
+  }
+
+  url.searchParams.set(ACTIVITY_MODE_QUERY_KEY, '1');
+  window.location.replace(url.toString());
 };
 
 const configureAuthGateForActivity = () => {
   if (!discordLoginBtn) return;
-  if (!isLikelyDiscordActivityContext()) return;
+  if (!hasActivityLaunchParams()) return;
 
-  discordLoginBtn.href = '/activity';
+  discordLoginBtn.href = '/activity?activity=1';
   discordLoginBtn.textContent = 'Open Activity Login';
   discordLoginBtn.setAttribute('target', '_self');
 };
@@ -1144,10 +1154,10 @@ const renderProgressOnly = () => {
 const loadMe = async () => {
   const me = await api('/api/me');
   if (!me.authenticated) {
-    if (isLikelyDiscordActivityContext()) {
+    if (hasActivityLaunchParams()) {
       sessionStorage.removeItem(ACTIVITY_TOKEN_STORAGE_KEY);
       activityAuthToken = null;
-      window.location.replace('/activity');
+      redirectToActivityBootstrap();
       return null;
     }
 
@@ -1514,8 +1524,8 @@ logoutBtn.addEventListener('click', async () => {
 initializeActivityToken();
 configureAuthGateForActivity();
 
-if (isLikelyDiscordActivityContext() && !activityAuthToken) {
-  window.location.replace('/activity');
+if (hasActivityLaunchParams() && !activityAuthToken) {
+  redirectToActivityBootstrap();
 }
 
 bootstrap().catch((error) => {
