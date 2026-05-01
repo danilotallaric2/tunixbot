@@ -57,6 +57,7 @@ class MusicManager {
   static TRACK_START_TIMEOUT_MS = 12000;
   static LAVALINK_CLOSE_LOG_WINDOW_MS = 5000;
   static PLAYLIST_LOAD_ADD_INTERVAL_MS = 100;
+  static PLAYLIST_RESOLVE_CONCURRENCY = 8;
 
   attachShoukakuEvents() {
     this.shoukaku.on('ready', (name) => {
@@ -500,50 +501,66 @@ class MusicManager {
       return;
     }
 
-    for (let i = 0; i < spotifyTracks.length; i += 1) {
+    const concurrency = Math.max(1, Number(MusicManager.PLAYLIST_RESOLVE_CONCURRENCY || 1));
+    for (let batchStart = 0; batchStart < spotifyTracks.length; batchStart += concurrency) {
       if (!this.queues.has(queue.guildId) || queue.playlistLoadJob !== job) return;
       if (job.cancelRequested) {
         this.finalizePlaylistLoadJob(queue, job, 'cancelled');
         return;
       }
 
-      const spotifyTrack = spotifyTracks[i];
-      let resolvedTrack = null;
-      try {
-        resolvedTrack = await this.resolveSingleSpotifyTrack(node, spotifyTrack, requestedBy);
-      } catch (error) {
-        logger.warn(`Spotify track resolve failed (${queue.guildId}): ${error.message || error}`);
-      }
+      const batch = spotifyTracks.slice(batchStart, batchStart + concurrency);
+      const batchResolved = await Promise.all(
+        batch.map(async (spotifyTrack) => {
+          try {
+            return await this.resolveSingleSpotifyTrack(node, spotifyTrack, requestedBy);
+          } catch (error) {
+            logger.warn(`Spotify track resolve failed (${queue.guildId}): ${error.message || error}`);
+            return null;
+          }
+        })
+      );
 
-      let added = false;
-      if (resolvedTrack) {
-        try {
-          added = await this.queuePlaylistTrackWithProgress(queue, job, resolvedTrack);
-        } catch (error) {
-          logger.warn(`Spotify playlist queue push failed (${queue.guildId}): ${error.message || error}`);
+      for (let i = 0; i < batchResolved.length; i += 1) {
+        if (!this.queues.has(queue.guildId) || queue.playlistLoadJob !== job) return;
+        if (job.cancelRequested) {
+          this.finalizePlaylistLoadJob(queue, job, 'cancelled');
+          return;
         }
-      }
 
-      if (!added && !resolvedTrack) {
-        job.skipped += 1;
-      } else if (!added) {
-        const remaining = spotifyTracks.length - job.processed;
-        job.skipped += Math.max(1, remaining);
-        job.processed = spotifyTracks.length;
-        this.updatePlaylistLoadJob(job, {
-          message: `Queue limit reached (${config.music.maxQueueSize})`
-        });
-        this.finalizePlaylistLoadJob(queue, job, 'completed');
-        return;
-      } else {
-        job.added += 1;
-      }
+        const absoluteIndex = batchStart + i;
+        const resolvedTrack = batchResolved[i];
+        let added = false;
+        if (resolvedTrack) {
+          try {
+            added = await this.queuePlaylistTrackWithProgress(queue, job, resolvedTrack);
+          } catch (error) {
+            logger.warn(`Spotify playlist queue push failed (${queue.guildId}): ${error.message || error}`);
+          }
+        }
 
-      job.processed += 1;
-      job.updatedAt = Date.now();
+        if (!added && !resolvedTrack) {
+          job.skipped += 1;
+        } else if (!added) {
+          const remaining = spotifyTracks.length - job.processed;
+          job.skipped += Math.max(1, remaining);
+          job.processed = spotifyTracks.length;
+          this.updatePlaylistLoadJob(job, {
+            message: `Queue limit reached (${config.music.maxQueueSize})`
+          });
+          this.finalizePlaylistLoadJob(queue, job, 'completed');
+          return;
+        } else {
+          job.added += 1;
+        }
 
-      if (i < spotifyTracks.length - 1) {
-        await this.sleep(MusicManager.PLAYLIST_LOAD_ADD_INTERVAL_MS);
+        job.processed += 1;
+        job.updatedAt = Date.now();
+
+        // Keep queue growth smooth for UX, but only delay when a track is actually added.
+        if (added && absoluteIndex < spotifyTracks.length - 1) {
+          await this.sleep(MusicManager.PLAYLIST_LOAD_ADD_INTERVAL_MS);
+        }
       }
     }
 

@@ -107,10 +107,16 @@ let lyricsLines = [];
 let lyricsTrackKey = null;
 let activeLyricIndex = -1;
 let lyricsRequestSeq = 0;
+let lyricsBackwardSyncUntilTs = 0;
+let pendingHardBackwardSync = null;
 let currentLocale = 'en';
 const lyricsCache = new Map();
 const lyricsInflight = new Map();
 const LYRICS_CACHE_MAX_ENTRIES = 80;
+
+const markLyricsBackwardSyncWindow = (ms = 2200) => {
+  lyricsBackwardSyncUntilTs = Date.now() + Math.max(250, Number(ms) || 0);
+};
 
 const I18N = {
   en: {
@@ -703,6 +709,7 @@ const syncProgressAnchorFromServer = (s) => {
     progressTrackKey = null;
     progressAnchorMs = 0;
     progressAnchorTs = now;
+    pendingHardBackwardSync = null;
     return;
   }
 
@@ -714,12 +721,16 @@ const syncProgressAnchorFromServer = (s) => {
     progressTrackKey = trackKey;
     progressAnchorMs = serverMs;
     progressAnchorTs = now;
+    pendingHardBackwardSync = null;
+    markLyricsBackwardSyncWindow(2600);
     return;
   }
 
   if (s.paused) {
+    const previousMs = progressAnchorMs;
     progressAnchorMs = serverMs;
     progressAnchorTs = now;
+    if (serverMs + 250 < previousMs) markLyricsBackwardSyncWindow(1800);
     return;
   }
 
@@ -727,22 +738,56 @@ const syncProgressAnchorFromServer = (s) => {
   const elapsed = Math.max(0, now - progressAnchorTs);
   const liveBeforeSync = (duration > 0 ? Math.min(progressAnchorMs + elapsed, duration) : progressAnchorMs + elapsed);
   const backwardDelta = liveBeforeSync - serverMs;
+  const likelyTrackRestart = duration > 0 && serverMs <= 1500 && liveBeforeSync >= Math.max(2000, duration - 2500);
 
-  if (backwardDelta > SERVER_PROGRESS_HARD_RESET_BACKWARD_MS) {
+  if (backwardDelta > SERVER_PROGRESS_HARD_RESET_BACKWARD_MS && likelyTrackRestart) {
     // Real backward seek/restart: trust server hard reset.
     progressAnchorMs = serverMs;
     progressAnchorTs = now;
+    pendingHardBackwardSync = null;
+    markLyricsBackwardSyncWindow(2800);
+    return;
+  }
+
+  if (backwardDelta > SERVER_PROGRESS_HARD_RESET_BACKWARD_MS && now <= lyricsBackwardSyncUntilTs) {
+    // User/manual seek window: allow a hard backward correction.
+    progressAnchorMs = serverMs;
+    progressAnchorTs = now;
+    pendingHardBackwardSync = null;
+    markLyricsBackwardSyncWindow(2200);
+    return;
+  }
+
+  if (backwardDelta > SERVER_PROGRESS_HARD_RESET_BACKWARD_MS) {
+    // For remote seeks/controls, require the backward jump to repeat before accepting.
+    const canConfirmFromPrevious =
+      pendingHardBackwardSync
+      && now - pendingHardBackwardSync.at <= 6000
+      && serverMs >= pendingHardBackwardSync.serverMs
+      && serverMs - pendingHardBackwardSync.serverMs <= 6000;
+
+    if (canConfirmFromPrevious) {
+      progressAnchorMs = serverMs;
+      progressAnchorTs = now;
+      pendingHardBackwardSync = null;
+      markLyricsBackwardSyncWindow(2400);
+      return;
+    }
+
+    pendingHardBackwardSync = { at: now, serverMs };
     return;
   }
 
   if (backwardDelta > SERVER_PROGRESS_BACKWARD_TOLERANCE_MS) {
     // Small backward jitter: ignore to keep lyrics smooth and monotonic.
+    pendingHardBackwardSync = null;
     return;
   }
 
   // Tiny backward adjustments are clamped to avoid visible line "bounce".
   progressAnchorMs = Math.max(serverMs, liveBeforeSync - SERVER_PROGRESS_MAX_SOFT_BACKSTEP_MS);
   progressAnchorTs = now;
+  pendingHardBackwardSync = null;
 };
 
 const getLiveProgressMs = () => {
@@ -869,6 +914,9 @@ const updateLyricsProgress = () => {
     else break;
   }
 
+  const backwardBlocked = idx < activeLyricIndex && Date.now() > lyricsBackwardSyncUntilTs;
+  if (backwardBlocked) idx = activeLyricIndex;
+
   const indexChanged = idx !== activeLyricIndex;
   if (indexChanged) {
     activeLyricIndex = idx;
@@ -882,7 +930,14 @@ const updateLyricsProgress = () => {
 
     if (idx >= 0) {
       const activeEl = lyricsLinesWrap.querySelector(`.lyric-line[data-index=\"${idx}\"]`);
-      if (activeEl) activeEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (activeEl) {
+        const bodyRect = lyricsBody.getBoundingClientRect();
+        const lineRect = activeEl.getBoundingClientRect();
+        const topSafe = bodyRect.top + bodyRect.height * 0.3;
+        const bottomSafe = bodyRect.top + bodyRect.height * 0.7;
+        const outOfSafeZone = lineRect.top < topSafe || lineRect.bottom > bottomSafe;
+        if (outOfSafeZone) activeEl.scrollIntoView({ behavior: 'auto', block: 'center' });
+      }
     }
   }
 
@@ -1143,6 +1198,7 @@ const renderNowPlaying = (s) => {
     lyricsTrackKey = null;
     activeLyricIndex = -1;
     lyricsRequestSeq += 1;
+    markLyricsBackwardSyncWindow(3000);
     prefetchLyricsForCurrentTrack();
     if (lyricsOpen) {
       loadLyricsForCurrentTrack().catch(() => {
@@ -1544,6 +1600,7 @@ seekRange.addEventListener('change', () => {
   if (!state?.current) return;
   progressAnchorMs = Number(seekRange.value);
   progressAnchorTs = Date.now();
+  markLyricsBackwardSyncWindow(3000);
   renderProgressOnly();
   control('seek', Number(seekRange.value));
 });
@@ -1552,6 +1609,7 @@ lyricsSeekRange.addEventListener('change', () => {
   if (!state?.current) return;
   progressAnchorMs = Number(lyricsSeekRange.value);
   progressAnchorTs = Date.now();
+  markLyricsBackwardSyncWindow(3000);
   renderProgressOnly();
   control('seek', Number(lyricsSeekRange.value));
 });
