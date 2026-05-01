@@ -29,6 +29,12 @@ const results = document.getElementById('results');
 const resultsCount = document.getElementById('resultsCount');
 const queueList = document.getElementById('queueList');
 const clearQueueBtn = document.getElementById('clearQueueBtn');
+const playlistLoadCard = document.getElementById('playlistLoadCard');
+const playlistLoadTitle = document.getElementById('playlistLoadTitle');
+const playlistLoadPercent = document.getElementById('playlistLoadPercent');
+const playlistLoadFill = document.getElementById('playlistLoadFill');
+const playlistLoadMeta = document.getElementById('playlistLoadMeta');
+const playlistLoadCancelBtn = document.getElementById('playlistLoadCancelBtn');
 const statusPill = document.getElementById('statusPill');
 
 const npThumb = document.getElementById('npThumb');
@@ -90,6 +96,9 @@ let state = null;
 let canControl = false;
 let pollTimer = null;
 let localProgressTimer = null;
+let pollingActive = false;
+let pollInFlight = false;
+let lastPlaylistLoadToastKey = null;
 let progressAnchorMs = 0;
 let progressAnchorTs = 0;
 let progressTrackKey = null;
@@ -157,7 +166,9 @@ const I18N = {
       detailsPaused: 'Paused',
       detailsPlaying: 'Playing',
       playNow: 'Play Now',
-      remove: 'Remove'
+      remove: 'Remove',
+      playlistLoadingTitle: 'Loading playlist...',
+      cancel: 'Cancel'
     },
     status: {
       searching: 'Searching...',
@@ -174,7 +185,11 @@ const I18N = {
       jumpingTo: 'Jumping to track #{index}...',
       queueCleared: 'Queue cleared',
       effectApplied: 'Effect applied: {effect}',
-      loadingLyrics: 'Loading lyrics...'
+      loadingLyrics: 'Loading lyrics...',
+      playlistLoadingStarted: 'Playlist loading started',
+      playlistLoadingCompleted: 'Playlist loaded: {added} tracks',
+      playlistLoadingCancelled: 'Playlist loading cancelled',
+      playlistLoadingFailed: 'Playlist loading failed'
     },
     buttons: {
       ariaResume: 'Resume playback',
@@ -252,7 +267,9 @@ const I18N = {
       detailsPaused: 'In pausa',
       detailsPlaying: 'In riproduzione',
       playNow: 'Riproduci Ora',
-      remove: 'Rimuovi'
+      remove: 'Rimuovi',
+      playlistLoadingTitle: 'Caricamento playlist...',
+      cancel: 'Annulla'
     },
     status: {
       searching: 'Ricerca in corso...',
@@ -269,7 +286,11 @@ const I18N = {
       jumpingTo: 'Passo al brano #{index}...',
       queueCleared: 'Coda svuotata',
       effectApplied: 'Effetto applicato: {effect}',
-      loadingLyrics: 'Caricamento lyrics...'
+      loadingLyrics: 'Caricamento lyrics...',
+      playlistLoadingStarted: 'Caricamento playlist avviato',
+      playlistLoadingCompleted: 'Playlist caricata: {added} brani',
+      playlistLoadingCancelled: 'Caricamento playlist annullato',
+      playlistLoadingFailed: 'Caricamento playlist fallito'
     },
     buttons: {
       ariaResume: 'Riprendi riproduzione',
@@ -448,6 +469,8 @@ const applyLocale = (locale) => {
   setText('#discoverSection .section-head h2', tr('ui.discoverSuggested'));
   setText('#resultsSection .section-head h2', tr('ui.resultsTitle'));
   setText('.right-col .queue-head h3', tr('ui.queueTitle'));
+  setText('#playlistLoadTitle', tr('ui.playlistLoadingTitle'));
+  setText('#playlistLoadCancelBtn', tr('ui.cancel'));
 
   for (const btn of sourceOptionButtons) {
     const key = btn.dataset.sourceOption === 'youtube' ? 'sources.youtube' : 'sources.spotify';
@@ -972,6 +995,57 @@ const renderQueue = (queue) => {
   }
 };
 
+const renderPlaylistLoad = (playlistLoad) => {
+  const snapshot = playlistLoad || null;
+  const isActive = Boolean(snapshot?.active);
+
+  if (!playlistLoadCard || !playlistLoadTitle || !playlistLoadPercent || !playlistLoadFill || !playlistLoadMeta || !playlistLoadCancelBtn) {
+    return;
+  }
+
+  if (!snapshot) {
+    playlistLoadCard.classList.add('hidden');
+    playlistLoadCancelBtn.disabled = false;
+    return;
+  }
+
+  const total = Math.max(0, Number(snapshot.total || 0));
+  const processed = Math.max(0, Number(snapshot.processed || 0));
+  const added = Math.max(0, Number(snapshot.added || 0));
+  const skipped = Math.max(0, Number(snapshot.skipped || 0));
+  const percent = total > 0 ? Math.round((processed / total) * 100) : 0;
+  const playlistName = String(snapshot.playlistName || '').trim();
+
+  const titleBase = tr('ui.playlistLoadingTitle');
+  playlistLoadTitle.textContent = playlistName ? `${titleBase} ${playlistName}` : titleBase;
+  playlistLoadPercent.textContent = `${percent}%`;
+  playlistLoadFill.style.width = `${percent}%`;
+  playlistLoadMeta.textContent = `${processed} / ${total} • +${added} • -${skipped}`;
+  playlistLoadCancelBtn.disabled = snapshot.status === 'cancelling';
+
+  const progressbar = playlistLoadCard.querySelector('.playlist-load-bar');
+  if (progressbar) progressbar.setAttribute('aria-valuenow', String(percent));
+
+  if (isActive) {
+    playlistLoadCard.classList.remove('hidden');
+  } else {
+    playlistLoadCard.classList.add('hidden');
+  }
+
+  const toastKey = `${snapshot.id || 'job'}:${snapshot.status || 'running'}:${snapshot.finishedAt || 0}:${snapshot.error || ''}`;
+  if (!isActive && lastPlaylistLoadToastKey !== toastKey) {
+    if (snapshot.status === 'completed') {
+      showToast(tr('status.playlistLoadingCompleted', { added }));
+    } else if (snapshot.status === 'cancelled') {
+      showToast(tr('status.playlistLoadingCancelled'));
+    } else if (snapshot.status === 'failed') {
+      showToast(snapshot.error || tr('status.playlistLoadingFailed'), 'error');
+    }
+    lastPlaylistLoadToastKey = toastKey;
+  }
+
+};
+
 const buildCard = (track) => {
   const card = document.createElement('article');
   card.className = 'song-card';
@@ -1063,6 +1137,7 @@ const renderNowPlaying = (s) => {
   updateEffectSelection(s.filter || 'clear');
 
   renderQueue(s.queue || []);
+  renderPlaylistLoad(s.playlistLoad || null);
 
   if (newTrackKey !== oldTrackKey) {
     lyricsTrackKey = null;
@@ -1171,6 +1246,10 @@ const enqueue = async (query) => {
     });
 
     await refreshSession();
+    if (payload?.result?.loading) {
+      setStatus(tr('status.playlistLoadingStarted'));
+      return;
+    }
     const added = Number(payload?.result?.addedCount || 0);
     const skipped = Number(payload?.result?.skippedCount || 0);
     if (skipped > 0) {
@@ -1201,6 +1280,48 @@ const control = async (action, value) => {
   }
 };
 
+const stopPollingLoop = () => {
+  pollingActive = false;
+  pollInFlight = false;
+  if (pollTimer) {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+};
+
+const getPollIntervalMs = () => {
+  if (state?.playlistLoad?.active) return 350;
+  return 2500;
+};
+
+const schedulePoll = (delayMs) => {
+  if (!pollingActive) return;
+  const safeDelay = Math.max(150, Number(delayMs || 0));
+  pollTimer = setTimeout(async () => {
+    if (!pollingActive) return;
+    if (pollInFlight) {
+      schedulePoll(250);
+      return;
+    }
+
+    pollInFlight = true;
+    try {
+      await refreshSession();
+    } catch {
+      // silent poll error
+    } finally {
+      pollInFlight = false;
+      schedulePoll(getPollIntervalMs());
+    }
+  }, safeDelay);
+};
+
+const startPollingLoop = () => {
+  stopPollingLoop();
+  pollingActive = true;
+  schedulePoll(getPollIntervalMs());
+};
+
 const bootstrap = async () => {
   const user = await loadMe();
   if (!user) return;
@@ -1223,8 +1344,7 @@ const bootstrap = async () => {
   updateSourceBadge();
   showVersionPopupIfNeeded();
 
-  if (pollTimer) clearInterval(pollTimer);
-  pollTimer = setInterval(() => refreshSession().catch(() => {}), 2500);
+  startPollingLoop();
 
   if (localProgressTimer) clearInterval(localProgressTimer);
   localProgressTimer = setInterval(() => {
@@ -1390,6 +1510,11 @@ queueList.addEventListener('click', async (event) => {
 clearQueueBtn?.addEventListener('click', async () => {
   const ok = await control('clear');
   if (ok) setStatus(tr('status.queueCleared'));
+});
+
+playlistLoadCancelBtn?.addEventListener('click', async () => {
+  const ok = await control('cancel_playlist_load');
+  if (ok) setStatus(tr('status.playlistLoadingCancelled'));
 });
 
 versionPopupCloseBtn?.addEventListener('click', dismissVersionPopup);

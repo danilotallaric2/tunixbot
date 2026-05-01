@@ -56,6 +56,7 @@ class MusicManager {
   static ALONE_DISCONNECT_MS = 10000;
   static TRACK_START_TIMEOUT_MS = 12000;
   static LAVALINK_CLOSE_LOG_WINDOW_MS = 5000;
+  static PLAYLIST_LOAD_ADD_INTERVAL_MS = 100;
 
   attachShoukakuEvents() {
     this.shoukaku.on('ready', (name) => {
@@ -257,6 +258,302 @@ class MusicManager {
     }
 
     return { tracks: [], playlistName: null };
+  }
+
+  sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+  }
+
+  isPlaylistLoadRunning(queue) {
+    return Boolean(queue?.playlistLoadJob?.active);
+  }
+
+  buildPlaylistLoadSnapshot(job) {
+    if (!job) return null;
+    const total = Math.max(0, Number(job.total || 0));
+    const processedRaw = Math.max(0, Number(job.processed || 0));
+    const processed = total > 0 ? Math.min(processedRaw, total) : processedRaw;
+    const added = Math.max(0, Number(job.added || 0));
+    const skipped = Math.max(0, Number(job.skipped || 0));
+    const progress = total > 0 ? Math.max(0, Math.min(1, processed / total)) : 0;
+
+    return {
+      id: String(job.id || ''),
+      active: Boolean(job.active),
+      status: String(job.status || 'running'),
+      sourceKind: String(job.sourceKind || 'playlist'),
+      playlistName: job.playlistName || null,
+      total,
+      processed,
+      added,
+      skipped,
+      requestedCount: Math.max(0, Number(job.requestedCount || total || 0)),
+      progress,
+      cancelRequested: Boolean(job.cancelRequested),
+      startedAt: Number(job.startedAt || 0),
+      updatedAt: Number(job.updatedAt || 0),
+      finishedAt: Number(job.finishedAt || 0),
+      message: job.message || null,
+      error: job.error || null
+    };
+  }
+
+  getPlaylistLoadSnapshot(guildId) {
+    const queue = this.getQueue(guildId);
+    if (!queue?.playlistLoadJob) return null;
+    return this.buildPlaylistLoadSnapshot(queue.playlistLoadJob);
+  }
+
+  createPlaylistLoadJob(queue, initial = {}) {
+    queue.clearPlaylistLoadCleanupTimer?.();
+    const now = Date.now();
+    const job = {
+      id: `${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+      active: true,
+      status: String(initial.status || 'running'),
+      sourceKind: String(initial.sourceKind || 'playlist'),
+      playlistName: initial.playlistName || null,
+      total: Math.max(0, Number(initial.total || 0)),
+      processed: Math.max(0, Number(initial.processed || 0)),
+      added: Math.max(0, Number(initial.added || 0)),
+      skipped: Math.max(0, Number(initial.skipped || 0)),
+      requestedCount: Math.max(0, Number(initial.requestedCount || initial.total || 0)),
+      cancelRequested: false,
+      startedAt: now,
+      updatedAt: now,
+      finishedAt: 0,
+      message: initial.message || null,
+      error: null
+    };
+
+    queue.playlistLoadJob = job;
+    return job;
+  }
+
+  updatePlaylistLoadJob(job, patch = {}) {
+    if (!job) return;
+    Object.assign(job, patch);
+    job.updatedAt = Date.now();
+  }
+
+  finalizePlaylistLoadJob(queue, job, status, patch = {}) {
+    if (!queue || !job) return;
+    if (queue.playlistLoadJob !== job) return;
+
+    const finishedAt = Date.now();
+    Object.assign(job, patch, {
+      active: false,
+      status,
+      finishedAt,
+      updatedAt: finishedAt
+    });
+
+    queue.clearPlaylistLoadCleanupTimer?.();
+    queue.playlistLoadCleanupTimer = setTimeout(() => {
+      const live = queue.playlistLoadJob;
+      if (!live || live.id !== job.id) return;
+      if (live.active) return;
+      queue.playlistLoadJob = null;
+    }, 5000);
+    queue.playlistLoadCleanupTimer.unref?.();
+  }
+
+  async cancelPlaylistLoad(guildId, options = {}) {
+    const queue = this.getQueue(guildId);
+    if (!queue) {
+      if (options.silent) return null;
+      throw new Error('Nessuna sessione attiva.');
+    }
+
+    const job = queue.playlistLoadJob;
+    if (!job || !job.active) {
+      if (options.silent) return null;
+      throw new Error('Nessun caricamento playlist attivo.');
+    }
+
+    this.updatePlaylistLoadJob(job, {
+      cancelRequested: true,
+      status: 'cancelling',
+      message: 'Cancellation requested'
+    });
+
+    return this.buildPlaylistLoadSnapshot(job);
+  }
+
+  getQueueCurrentSize(queue) {
+    return queue.tracks.length + (queue.current ? 1 : 0);
+  }
+
+  async queuePlaylistTrackWithProgress(queue, job, track) {
+    if (!queue || !job) return false;
+    if (!this.queues.has(queue.guildId)) return false;
+    if (queue.playlistLoadJob !== job) return false;
+
+    const maxSize = Math.max(1, Number(config.music.maxQueueSize || 500));
+    const currentSize = this.getQueueCurrentSize(queue);
+    if (currentSize >= maxSize) return false;
+
+    queue.tracks.push(track);
+    if (!queue.current) {
+      await this.playNext(queue);
+    }
+
+    return true;
+  }
+
+  async runMappedPlaylistLoad(queue, job, tracks) {
+    const total = Math.max(0, Number(tracks?.length || 0));
+    this.updatePlaylistLoadJob(job, {
+      total,
+      requestedCount: total,
+      status: 'running'
+    });
+
+    if (!total) {
+      this.finalizePlaylistLoadJob(queue, job, 'failed', {
+        error: 'Nessun brano trovato nella playlist.'
+      });
+      return;
+    }
+
+    for (let i = 0; i < tracks.length; i += 1) {
+      if (!this.queues.has(queue.guildId) || queue.playlistLoadJob !== job) return;
+      if (job.cancelRequested) {
+        this.finalizePlaylistLoadJob(queue, job, 'cancelled');
+        return;
+      }
+
+      const track = tracks[i];
+      let added = false;
+      if (track) {
+        try {
+          added = await this.queuePlaylistTrackWithProgress(queue, job, track);
+        } catch (error) {
+          logger.warn(`Playlist queue push failed (${queue.guildId}): ${error.message || error}`);
+        }
+      }
+
+      if (!added && !track) {
+        job.skipped += 1;
+      } else if (!added) {
+        const remaining = total - job.processed;
+        job.skipped += Math.max(1, remaining);
+        job.processed = total;
+        this.updatePlaylistLoadJob(job, {
+          message: `Queue limit reached (${config.music.maxQueueSize})`
+        });
+        this.finalizePlaylistLoadJob(queue, job, 'completed');
+        return;
+      } else {
+        job.added += 1;
+      }
+
+      job.processed += 1;
+      job.updatedAt = Date.now();
+
+      if (i < tracks.length - 1) {
+        await this.sleep(MusicManager.PLAYLIST_LOAD_ADD_INTERVAL_MS);
+      }
+    }
+
+    if (!this.queues.has(queue.guildId) || queue.playlistLoadJob !== job) return;
+    if (job.cancelRequested) {
+      this.finalizePlaylistLoadJob(queue, job, 'cancelled');
+      return;
+    }
+
+    this.finalizePlaylistLoadJob(queue, job, 'completed');
+  }
+
+  async startSpotifyPlaylistLoad(queue, job, query, requestedBy, spotifyMarket) {
+    const node = queue.player.node || this.getIdealNodeSafe();
+    if (!node) {
+      this.finalizePlaylistLoadJob(queue, job, 'failed', {
+        error: 'Nessun nodo Lavalink disponibile.'
+      });
+      return;
+    }
+
+    let resolved;
+    try {
+      resolved = await this.spotify.resolve(query, { market: spotifyMarket });
+    } catch (error) {
+      this.finalizePlaylistLoadJob(queue, job, 'failed', {
+        error: error.message || String(error)
+      });
+      return;
+    }
+
+    const spotifyTracks = Array.isArray(resolved?.tracks) ? resolved.tracks : [];
+    this.updatePlaylistLoadJob(job, {
+      status: 'running',
+      sourceKind: resolved?.kind || 'playlist',
+      playlistName: resolved?.name || null,
+      total: spotifyTracks.length,
+      requestedCount: spotifyTracks.length
+    });
+
+    if (!spotifyTracks.length) {
+      this.finalizePlaylistLoadJob(queue, job, 'failed', {
+        error: 'Nessun brano trovato nella playlist.'
+      });
+      return;
+    }
+
+    for (let i = 0; i < spotifyTracks.length; i += 1) {
+      if (!this.queues.has(queue.guildId) || queue.playlistLoadJob !== job) return;
+      if (job.cancelRequested) {
+        this.finalizePlaylistLoadJob(queue, job, 'cancelled');
+        return;
+      }
+
+      const spotifyTrack = spotifyTracks[i];
+      let resolvedTrack = null;
+      try {
+        resolvedTrack = await this.resolveSingleSpotifyTrack(node, spotifyTrack, requestedBy);
+      } catch (error) {
+        logger.warn(`Spotify track resolve failed (${queue.guildId}): ${error.message || error}`);
+      }
+
+      let added = false;
+      if (resolvedTrack) {
+        try {
+          added = await this.queuePlaylistTrackWithProgress(queue, job, resolvedTrack);
+        } catch (error) {
+          logger.warn(`Spotify playlist queue push failed (${queue.guildId}): ${error.message || error}`);
+        }
+      }
+
+      if (!added && !resolvedTrack) {
+        job.skipped += 1;
+      } else if (!added) {
+        const remaining = spotifyTracks.length - job.processed;
+        job.skipped += Math.max(1, remaining);
+        job.processed = spotifyTracks.length;
+        this.updatePlaylistLoadJob(job, {
+          message: `Queue limit reached (${config.music.maxQueueSize})`
+        });
+        this.finalizePlaylistLoadJob(queue, job, 'completed');
+        return;
+      } else {
+        job.added += 1;
+      }
+
+      job.processed += 1;
+      job.updatedAt = Date.now();
+
+      if (i < spotifyTracks.length - 1) {
+        await this.sleep(MusicManager.PLAYLIST_LOAD_ADD_INTERVAL_MS);
+      }
+    }
+
+    if (!this.queues.has(queue.guildId) || queue.playlistLoadJob !== job) return;
+    if (job.cancelRequested) {
+      this.finalizePlaylistLoadJob(queue, job, 'cancelled');
+      return;
+    }
+
+    this.finalizePlaylistLoadJob(queue, job, 'completed');
   }
 
   buildTrack(rawTrack, requestedBy, metadata = null) {
@@ -1174,9 +1471,11 @@ class MusicManager {
     if (!queue) return;
 
     try {
+      await this.cancelPlaylistLoad(guildId, { silent: true });
       queue.clearDisconnectTimer();
       queue.clearNowPlayingTimer();
       queue.clearTrackStartTimeout();
+      queue.clearPlaylistLoadCleanupTimer?.();
       if (deleteNowPlayingMessage && queue.nowPlayingMessageId) {
         const channel = await this.client.channels.fetch(queue.textChannelId).catch(() => null);
         if (channel && channel.isTextBased()) {
@@ -1216,7 +1515,8 @@ class MusicManager {
     requestedBy,
     locale = 'en',
     userLocale = null,
-    spotifyMarket = null
+    spotifyMarket = null,
+    allowAsyncPlaylistLoad = false
   }) {
     this.assertLavalinkAvailable();
     const resolvedSpotifyMarket = this.resolveSpotifyMarket(spotifyMarket || userLocale || locale);
@@ -1242,18 +1542,99 @@ class MusicManager {
     const node = queue.player.node || this.getIdealNodeSafe();
     if (!node) throw new Error('Nessun nodo Lavalink disponibile.');
 
-    const resolved = await this.resolvePlayableTracks(node, query, requestedBy, {
-      locale,
-      spotifyMarket: resolvedSpotifyMarket
-    });
-    if (!resolved.tracks.length) {
-      throw new Error('Nessun risultato trovato per la tua richiesta.');
+    if (allowAsyncPlaylistLoad && this.isPlaylistLoadRunning(queue)) {
+      throw new Error('E gia in corso un caricamento playlist. Annullalo prima di iniziarne un altro.');
     }
 
-    const currentSize = queue.tracks.length + (queue.current ? 1 : 0);
+    const currentSize = this.getQueueCurrentSize(queue);
     const available = config.music.maxQueueSize - currentSize;
     if (available <= 0) {
       throw new Error(`Coda piena. Limite massimo: ${config.music.maxQueueSize} brani.`);
+    }
+
+    const parsedSpotify = SpotifyService.parseSpotifyUrl(query);
+    if (allowAsyncPlaylistLoad && parsedSpotify && parsedSpotify.type !== 'track') {
+      const job = this.createPlaylistLoadJob(queue, {
+        status: 'resolving',
+        sourceKind: parsedSpotify.type === 'album' ? 'album' : 'playlist',
+        playlistName: null,
+        total: 0,
+        requestedCount: 0,
+        message: 'Resolving playlist'
+      });
+
+      this.startSpotifyPlaylistLoad(queue, job, query, requestedBy, resolvedSpotifyMarket).catch((error) => {
+        logger.error(`Spotify playlist load failed (${queue.guildId})`, error);
+        this.finalizePlaylistLoadJob(queue, job, 'failed', {
+          error: error?.message || String(error)
+        });
+      });
+
+      return {
+        loading: true,
+        addedCount: 0,
+        sourceKind: job.sourceKind,
+        playlistName: job.playlistName,
+        requestedCount: 0,
+        skippedCount: 0,
+        firstTrack: null,
+        willStartImmediately: !queue.current,
+        playlistLoad: this.buildPlaylistLoadSnapshot(job)
+      };
+    }
+
+    let resolved = null;
+    if (allowAsyncPlaylistLoad && this.isUrl(query) && !SpotifyService.isSpotifyUrl(query)) {
+      const direct = await this.searchLavalink(node, query);
+      const mappedTracks = direct.tracks.map((t) => this.buildTrack(t, requestedBy));
+      const isPlaylist = Boolean(direct.playlistName) && mappedTracks.length > 1;
+
+      if (isPlaylist) {
+        const job = this.createPlaylistLoadJob(queue, {
+          status: 'running',
+          sourceKind: 'playlist',
+          playlistName: direct.playlistName || null,
+          total: mappedTracks.length,
+          requestedCount: mappedTracks.length
+        });
+
+        this.runMappedPlaylistLoad(queue, job, mappedTracks).catch((error) => {
+          logger.error(`Playlist load failed (${queue.guildId})`, error);
+          this.finalizePlaylistLoadJob(queue, job, 'failed', {
+            error: error?.message || String(error)
+          });
+        });
+
+        return {
+          loading: true,
+          addedCount: 0,
+          sourceKind: 'playlist',
+          playlistName: direct.playlistName || null,
+          requestedCount: mappedTracks.length,
+          skippedCount: 0,
+          firstTrack: null,
+          willStartImmediately: !queue.current,
+          playlistLoad: this.buildPlaylistLoadSnapshot(job)
+        };
+      }
+
+      resolved = {
+        tracks: mappedTracks,
+        playlistName: direct.playlistName,
+        sourceKind: direct.playlistName ? 'playlist' : 'track',
+        requestedCount: mappedTracks.length,
+        skippedCount: 0
+      };
+    }
+
+    if (!resolved) {
+      resolved = await this.resolvePlayableTracks(node, query, requestedBy, {
+        locale,
+        spotifyMarket: resolvedSpotifyMarket
+      });
+    }
+    if (!resolved.tracks.length) {
+      throw new Error('Nessun risultato trovato per la tua richiesta.');
     }
 
     const toAdd = resolved.tracks.slice(0, available);
@@ -1382,6 +1763,7 @@ class MusicManager {
     const queue = this.getQueue(guildId);
     if (!queue) throw new Error('Nessuna sessione attiva.');
     const locale = this.resolveQueueLocale(queue);
+    await this.cancelPlaylistLoad(guildId, { silent: true });
 
     queue.tracks = [];
     const hadCurrent = Boolean(queue.current);
@@ -1475,6 +1857,7 @@ class MusicManager {
     const queue = this.getQueue(guildId);
     if (!queue) throw new Error('Nessuna sessione attiva.');
 
+    await this.cancelPlaylistLoad(guildId, { silent: true });
     queue.tracks = [];
     return queue;
   }

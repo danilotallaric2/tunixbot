@@ -689,6 +689,67 @@ svg {
   font-family: SpotifyMixUITitle, SpotifyMixUI, sans-serif;
 }
 
+.playlist-load-card {
+  border-radius: 10px;
+  border: 1px solid rgba(110, 175, 255, 0.36);
+  background: rgba(15, 25, 45, 0.92);
+  padding: 9px;
+  display: grid;
+  gap: 7px;
+}
+
+.playlist-load-top,
+.playlist-load-bottom {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.playlist-load-title {
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: #ecf8ff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.playlist-load-percent {
+  font-size: 0.76rem;
+  font-weight: 800;
+  color: #bdeeff;
+}
+
+.playlist-load-bar {
+  height: 7px;
+  width: 100%;
+  border-radius: 999px;
+  background: rgba(114, 162, 226, 0.28);
+  overflow: hidden;
+}
+
+.playlist-load-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #51dcff, #8cf4ff);
+  transition: width 0.16s linear;
+}
+
+.playlist-load-meta {
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
+.ctl.tiny {
+  height: 24px;
+  min-height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+}
+
 .queue-list {
   flex: 1;
   overflow: auto;

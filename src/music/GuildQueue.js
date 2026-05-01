@@ -36,6 +36,8 @@ class GuildQueue {
     this.joinedAt = 0;
     this.locale = normalizeLocale(locale);
     this.spotifyMarket = String(spotifyMarket || 'IT').toUpperCase();
+    this.playlistLoadJob = null;
+    this.playlistLoadCleanupTimer = null;
 
     this.autoDisconnectMs = autoDisconnectMs;
     this.disconnectTimer = null;
@@ -59,6 +61,13 @@ class GuildQueue {
     if (this.trackStartTimeout) {
       clearTimeout(this.trackStartTimeout);
       this.trackStartTimeout = null;
+    }
+  }
+
+  clearPlaylistLoadCleanupTimer() {
+    if (this.playlistLoadCleanupTimer) {
+      clearTimeout(this.playlistLoadCleanupTimer);
+      this.playlistLoadCleanupTimer = null;
     }
   }
 }

@@ -79,6 +79,7 @@ const buildStateFromQueue = (client, queue) => {
       connected: false,
       current: null,
       queue: [],
+      playlistLoad: null,
       volume: config.music.defaultVolume,
       loop: 'off',
       paused: false,
@@ -89,6 +90,7 @@ const buildStateFromQueue = (client, queue) => {
   }
 
   const position = client.musicManager.getPlayerPosition(queue);
+  const playlistLoad = client.musicManager.buildPlaylistLoadSnapshot(queue.playlistLoadJob);
 
   return {
     connected: true,
@@ -115,6 +117,7 @@ const buildStateFromQueue = (client, queue) => {
       thumbnail: track.thumbnail,
       url: track.url
     })),
+    playlistLoad: playlistLoad || null,
     volume: queue.volume,
     loop: queue.loopMode,
     filter: queue.filter || 'clear',
@@ -551,7 +554,8 @@ const createDashboardServer = (client) => {
         query,
         requestedBy: req.session.user.id,
         locale,
-        userLocale: userLocaleRaw
+        userLocale: userLocaleRaw,
+        allowAsyncPlaylistLoad: true
       });
 
       const payload = await buildSessionPayload(req);
@@ -581,6 +585,7 @@ const createDashboardServer = (client) => {
       else if (action === 'clear') await client.musicManager.clearQueue(guildId);
       else if (action === 'remove') await client.musicManager.removeAt(guildId, Number(value));
       else if (action === 'play_index') await client.musicManager.playFromQueueAt(guildId, Number(value));
+      else if (action === 'cancel_playlist_load') await client.musicManager.cancelPlaylistLoad(guildId);
       else if (action === 'volume') await client.musicManager.setVolume(guildId, Number(value));
       else if (action === 'seek') await client.musicManager.seek(guildId, Number(value));
       else if (action === 'filter') await client.musicManager.applyFilter(guildId, String(value || 'clear'));

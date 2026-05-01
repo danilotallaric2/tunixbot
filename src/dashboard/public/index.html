@@ -246,6 +246,19 @@
             <h3>Coda</h3>
             <button id="clearQueueBtn" class="ctl danger">Svuota</button>
           </div>
+          <div id="playlistLoadCard" class="playlist-load-card hidden" aria-live="polite">
+            <div class="playlist-load-top">
+              <div id="playlistLoadTitle" class="playlist-load-title">Caricamento playlist...</div>
+              <div id="playlistLoadPercent" class="playlist-load-percent">0%</div>
+            </div>
+            <div class="playlist-load-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <div id="playlistLoadFill" class="playlist-load-fill"></div>
+            </div>
+            <div class="playlist-load-bottom">
+              <span id="playlistLoadMeta" class="playlist-load-meta">0 / 0</span>
+              <button id="playlistLoadCancelBtn" class="ctl danger tiny">Annulla</button>
+            </div>
+          </div>
           <div id="queueList" class="queue-list"></div>
         </aside>
       </div>
