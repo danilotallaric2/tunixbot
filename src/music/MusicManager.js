@@ -57,7 +57,7 @@ class MusicManager {
   static TRACK_START_TIMEOUT_MS = 12000;
   static LAVALINK_CLOSE_LOG_WINDOW_MS = 5000;
   static PLAYLIST_LOAD_ADD_INTERVAL_MS = 100;
-  static PLAYLIST_RESOLVE_CONCURRENCY = 8;
+  static PLAYLIST_RESOLVE_CONCURRENCY = 2;
 
   attachShoukakuEvents() {
     this.shoukaku.on('ready', (name) => {
@@ -1144,7 +1144,7 @@ class MusicManager {
     if (SpotifyService.isSpotifyUrl(query)) {
       const resolved = await this.spotify.resolve(query, { market: resolvedMarket });
       const mapped = [];
-      const batchSize = 6;
+      const batchSize = Math.max(1, Number(MusicManager.PLAYLIST_RESOLVE_CONCURRENCY || 1));
       const requestedCount = resolved.tracks.length;
 
       for (let i = 0; i < resolved.tracks.length; i += batchSize) {
