@@ -4,6 +4,18 @@ const openDashboardBtn = document.getElementById('openDashboardBtn');
 
 const ACTIVITY_TOKEN_STORAGE_KEY = 'tunixbot_activity_auth';
 
+window.addEventListener('error', (event) => {
+  setStatus(`Activity error: ${event?.message || 'Unknown error'}`, 'error');
+  setRetryVisible(true);
+});
+
+window.addEventListener('unhandledrejection', (event) => {
+  const reason = event?.reason;
+  const message = typeof reason === 'string' ? reason : reason?.message || 'Unknown promise rejection';
+  setStatus(`Activity error: ${message}`, 'error');
+  setRetryVisible(true);
+});
+
 const setStatus = (message, kind = 'info') => {
   if (!statusEl) return;
   statusEl.textContent = String(message || '');
@@ -85,7 +97,7 @@ const launch = async () => {
     client_id: config.clientId,
     response_type: 'code',
     state: randomHex(16),
-    prompt: 'none',
+    prompt: 'consent',
     scope: ['identify', 'guilds'],
     redirect_uri: config.redirectUri
   });

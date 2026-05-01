@@ -497,7 +497,13 @@ const createDashboardServer = (client) => {
 
   app.get('/auth/discord/login', (req, res) => {
     const referer = String(req.get('referer') || '');
-    const fromActivity = String(req.query?.activity || '') === '1' || referer.includes('/activity');
+    const secFetchDest = String(req.get('sec-fetch-dest') || '').toLowerCase();
+    const userAgent = String(req.get('user-agent') || '').toLowerCase();
+    const fromActivity =
+      String(req.query?.activity || '') === '1' ||
+      referer.includes('/activity') ||
+      secFetchDest === 'iframe' ||
+      userAgent.includes('discord');
     if (fromActivity) {
       res.redirect('/activity');
       return;

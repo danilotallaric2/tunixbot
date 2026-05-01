@@ -389,6 +389,7 @@ const configureAuthGateForActivity = () => {
 
   discordLoginBtn.href = '/activity';
   discordLoginBtn.textContent = 'Open Activity Login';
+  discordLoginBtn.setAttribute('target', '_self');
 };
 
 const initializeActivityToken = () => {
@@ -1512,6 +1513,11 @@ logoutBtn.addEventListener('click', async () => {
 
 initializeActivityToken();
 configureAuthGateForActivity();
+
+if (isLikelyDiscordActivityContext() && !activityAuthToken) {
+  window.location.replace('/activity');
+}
+
 bootstrap().catch((error) => {
   setStatus(error.message, true);
 });
