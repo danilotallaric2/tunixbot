@@ -496,13 +496,14 @@ const createDashboardServer = (client) => {
   app.get('/api/search', requireAuth, async (req, res) => {
     const q = String(req.query.q || '').trim();
     const source = parseSearchSource(String(req.query.source || 'spotify').toLowerCase());
+    const userLocaleRaw = req.session?.user?.discordLocale || req.session?.user?.locale || req.session?.locale || 'it';
     if (!q) {
       res.json({ tracks: [] });
       return;
     }
 
     try {
-      const tracks = await client.musicManager.searchTracks(q, { source, limit: 30 });
+      const tracks = await client.musicManager.searchTracks(q, { source, limit: 30, locale: userLocaleRaw });
       res.json({ tracks, source });
     } catch (error) {
       res.status(500).json({ error: formatApiError(req, error, 'dashboard.errorSearch') });
@@ -512,10 +513,11 @@ const createDashboardServer = (client) => {
   app.get('/api/discover', requireAuth, async (req, res) => {
     try {
       const seeds = ['italian rap', 'pop 2026', 'chill mix', 'night drive', 'viral hits', 'dance playlist'];
+      const userLocaleRaw = req.session?.user?.discordLocale || req.session?.user?.locale || req.session?.locale || 'it';
 
       const sections = [];
       for (const seed of seeds) {
-        const tracks = await client.musicManager.searchTracks(seed, 8);
+        const tracks = await client.musicManager.searchTracks(seed, { source: 'spotify', limit: 8, locale: userLocaleRaw });
         sections.push({ title: seed, tracks });
       }
 
@@ -536,6 +538,7 @@ const createDashboardServer = (client) => {
     try {
       const { session, queue } = await requireControllableSession(req);
       const locale = getRequestLocale(req);
+      const userLocaleRaw = req.session?.user?.discordLocale || req.session?.user?.locale || req.session?.locale || locale;
       client.musicManager.setQueueLocale(queue, locale);
 
       const result = await client.musicManager.enqueueQuery({
@@ -544,7 +547,8 @@ const createDashboardServer = (client) => {
         textChannelId: queue.textChannelId,
         query,
         requestedBy: req.session.user.id,
-        locale
+        locale,
+        userLocale: userLocaleRaw
       });
 
       const payload = await buildSessionPayload(req);

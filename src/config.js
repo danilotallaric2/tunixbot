@@ -42,7 +42,7 @@ const config = {
   spotify: {
     clientId: process.env.SPOTIFY_CLIENT_ID,
     clientSecret: process.env.SPOTIFY_CLIENT_SECRET,
-    market: process.env.SPOTIFY_MARKET || 'US'
+    market: process.env.SPOTIFY_MARKET || 'IT'
   },
   music: {
     defaultVolume: parseIntOr(process.env.DEFAULT_VOLUME, 80),

@@ -3,7 +3,7 @@ const SpotifyWebApi = require('spotify-web-api-node');
 class SpotifyService {
   constructor({ clientId, clientSecret, market }) {
     this.enabled = Boolean(clientId && clientSecret);
-    this.market = market || 'US';
+    this.market = SpotifyService.normalizeMarketCode(market, 'IT');
 
     if (!this.enabled) {
       this.api = null;
@@ -17,6 +17,13 @@ class SpotifyService {
 
   static isSpotifyUrl(query) {
     return Boolean(SpotifyService.parseSpotifyUrl(query));
+  }
+
+  static normalizeMarketCode(value, fallback = 'IT') {
+    const fallbackCode = /^[A-Z]{2}$/.test(String(fallback || '').toUpperCase()) ? String(fallback).toUpperCase() : 'IT';
+    const raw = String(value || '').trim().toUpperCase();
+    if (!/^[A-Z]{2}$/.test(raw)) return fallbackCode;
+    return raw;
   }
 
   static parseSpotifyUrl(query) {
@@ -100,11 +107,12 @@ class SpotifyService {
     };
   }
 
-  async getTrack(urlOrUri) {
+  async getTrack(urlOrUri, options = {}) {
     const parsed = SpotifyService.parseSpotifyUrl(urlOrUri);
     if (!parsed || parsed.type !== 'track') throw new Error('Spotify track URL non valido');
+    const market = SpotifyService.normalizeMarketCode(options.market, this.market);
     try {
-      const { body } = await this.api.getTrack(parsed.id, { market: this.market });
+      const { body } = await this.api.getTrack(parsed.id, { market });
       return {
         tracks: [this.mapTrack(body)],
         name: null,
@@ -115,11 +123,12 @@ class SpotifyService {
     }
   }
 
-  async getAlbum(urlOrUri) {
+  async getAlbum(urlOrUri, options = {}) {
     const parsed = SpotifyService.parseSpotifyUrl(urlOrUri);
     if (!parsed || parsed.type !== 'album') throw new Error('Spotify album URL non valido');
+    const market = SpotifyService.normalizeMarketCode(options.market, this.market);
     try {
-      const { body } = await this.api.getAlbum(parsed.id, { market: this.market });
+      const { body } = await this.api.getAlbum(parsed.id, { market });
       const tracks = body.tracks.items.map((t) => {
         const synthetic = { ...t, album: body };
         return this.mapTrack(synthetic, body.images?.[0]?.url || null);
@@ -135,17 +144,18 @@ class SpotifyService {
     }
   }
 
-  async getPlaylist(urlOrUri) {
+  async getPlaylist(urlOrUri, options = {}) {
     const parsed = SpotifyService.parseSpotifyUrl(urlOrUri);
     if (!parsed || parsed.type !== 'playlist') throw new Error('Spotify playlist URL non valido');
+    const market = SpotifyService.normalizeMarketCode(options.market, this.market);
     try {
-      const playlistMeta = await this.api.getPlaylist(parsed.id, { market: this.market });
+      const playlistMeta = await this.api.getPlaylist(parsed.id, { market });
       const all = [];
       let offset = 0;
 
       while (true) {
         const page = await this.api.getPlaylistTracks(parsed.id, {
-          market: this.market,
+          market,
           limit: 100,
           offset
         });
@@ -169,7 +179,7 @@ class SpotifyService {
     }
   }
 
-  async resolve(urlOrUri) {
+  async resolve(urlOrUri, options = {}) {
     if (!this.enabled) {
       throw new Error('Spotify non configurato. Imposta SPOTIFY_CLIENT_ID e SPOTIFY_CLIENT_SECRET.');
     }
@@ -177,9 +187,9 @@ class SpotifyService {
     const parsed = SpotifyService.parseSpotifyUrl(urlOrUri);
     if (!parsed) throw new Error('Link Spotify non valido');
 
-    if (parsed.type === 'track') return this.getTrack(urlOrUri);
-    if (parsed.type === 'album') return this.getAlbum(urlOrUri);
-    if (parsed.type === 'playlist') return this.getPlaylist(urlOrUri);
+    if (parsed.type === 'track') return this.getTrack(urlOrUri, options);
+    if (parsed.type === 'album') return this.getAlbum(urlOrUri, options);
+    if (parsed.type === 'playlist') return this.getPlaylist(urlOrUri, options);
 
     throw new Error('Tipo Spotify non supportato');
   }

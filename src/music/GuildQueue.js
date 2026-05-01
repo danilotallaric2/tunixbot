@@ -1,7 +1,16 @@
 const { normalizeLocale } = require('../utils/i18n');
 
 class GuildQueue {
-  constructor({ guildId, textChannelId, voiceChannelId, player, defaultVolume, autoDisconnectMs, locale = 'en' }) {
+  constructor({
+    guildId,
+    textChannelId,
+    voiceChannelId,
+    player,
+    defaultVolume,
+    autoDisconnectMs,
+    locale = 'en',
+    spotifyMarket = 'IT'
+  }) {
     this.guildId = guildId;
     this.textChannelId = textChannelId;
     this.voiceChannelId = voiceChannelId;
@@ -26,6 +35,7 @@ class GuildQueue {
     this.joinedByUserId = null;
     this.joinedAt = 0;
     this.locale = normalizeLocale(locale);
+    this.spotifyMarket = String(spotifyMarket || 'IT').toUpperCase();
 
     this.autoDisconnectMs = autoDisconnectMs;
     this.disconnectTimer = null;

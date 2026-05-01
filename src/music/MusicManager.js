@@ -140,6 +140,71 @@ class MusicManager {
     queue.locale = normalizeLocale(locale || queue.locale || 'en');
   }
 
+  getDefaultSpotifyMarket() {
+    const configured = String(config.spotify.market || '').trim().toUpperCase();
+    if (/^[A-Z]{2}$/.test(configured)) return configured;
+    return 'IT';
+  }
+
+  resolveSpotifyMarket(input = null, fallback = null) {
+    const fallbackMarket = SpotifyService.normalizeMarketCode(fallback || this.getDefaultSpotifyMarket(), 'IT');
+    const raw = String(input || '').trim();
+    if (!raw) return fallbackMarket;
+
+    const normalizedRaw = raw.replace(/_/g, '-');
+    const directMarket = normalizedRaw.toUpperCase();
+    if (/^[A-Z]{2}$/.test(directMarket)) return directMarket;
+
+    const localeLower = normalizedRaw.toLowerCase();
+    const regionMatch = localeLower.match(/^[a-z]{2,3}-([a-z]{2})$/);
+    if (regionMatch) {
+      return SpotifyService.normalizeMarketCode(regionMatch[1], fallbackMarket);
+    }
+
+    const language = localeLower.match(/^([a-z]{2,3})/)?.[1] || '';
+    const languageToMarket = {
+      it: 'IT',
+      en: 'US',
+      ru: 'RU',
+      uk: 'UA',
+      es: 'ES',
+      pt: 'BR',
+      fr: 'FR',
+      de: 'DE',
+      nl: 'NL',
+      pl: 'PL',
+      tr: 'TR',
+      ro: 'RO',
+      hu: 'HU',
+      cs: 'CZ',
+      sk: 'SK',
+      bg: 'BG',
+      el: 'GR',
+      sv: 'SE',
+      no: 'NO',
+      da: 'DK',
+      fi: 'FI',
+      hr: 'HR',
+      sr: 'RS',
+      sl: 'SI',
+      et: 'EE',
+      lv: 'LV',
+      lt: 'LT',
+      id: 'ID',
+      ms: 'MY',
+      vi: 'VN',
+      th: 'TH',
+      ko: 'KR',
+      ja: 'JP',
+      zh: 'TW',
+      ar: 'SA',
+      he: 'IL',
+      hi: 'IN'
+    };
+
+    return languageToMarket[language] || fallbackMarket;
+  }
+
   getPlayerPosition(queue) {
     if (!queue.current) return 0;
 
@@ -357,8 +422,9 @@ class MusicManager {
     return parsed.id;
   }
 
-  async findSpotifySeedTrackId(seedTrack) {
+  async findSpotifySeedTrackId(seedTrack, market = null) {
     if (!this.spotify.enabled || !this.spotify.api || !seedTrack) return null;
+    const resolvedMarket = this.resolveSpotifyMarket(market);
 
     const directId = this.extractSpotifyTrackId(seedTrack.url);
     if (directId) return directId;
@@ -370,7 +436,7 @@ class MusicManager {
 
     try {
       const result = await this.spotify.api.searchTracks(query, {
-        market: config.spotify.market,
+        market: resolvedMarket,
         limit: 5
       });
       const items = result.body?.tracks?.items || [];
@@ -573,10 +639,11 @@ class MusicManager {
     return excluded;
   }
 
-  async fetchSpotifyAutoplayCandidates(seedTrack, limit = 25) {
+  async fetchSpotifyAutoplayCandidates(seedTrack, limit = 25, market = null) {
     if (!this.spotify.enabled || !this.spotify.api) return [];
+    const resolvedMarket = this.resolveSpotifyMarket(market);
 
-    const seedTrackId = await this.findSpotifySeedTrackId(seedTrack);
+    const seedTrackId = await this.findSpotifySeedTrackId(seedTrack, resolvedMarket);
     const collected = [];
     const seenIds = new Set();
     const seenUrls = new Set();
@@ -596,7 +663,7 @@ class MusicManager {
     if (seedTrackId) {
       try {
         const recommendations = await this.spotify.api.getRecommendations({
-          market: config.spotify.market,
+          market: resolvedMarket,
           seed_tracks: [seedTrackId],
           limit
         });
@@ -620,7 +687,7 @@ class MusicManager {
       if (collected.length >= limit) break;
       try {
         const result = await this.spotify.api.searchTracks(query, {
-          market: config.spotify.market,
+          market: resolvedMarket,
           limit: Math.min(15, limit)
         });
         for (const track of result.body?.tracks?.items || []) pushSpotifyTrack(track);
@@ -632,9 +699,9 @@ class MusicManager {
     return collected;
   }
 
-  async resolveAutoplayTrack(node, seedTrack, requestedBy, queue) {
+  async resolveAutoplayTrack(node, seedTrack, requestedBy, queue, market = null) {
     const excludedKeys = this.collectAutoplayExcludeKeys(queue, seedTrack);
-    const spotifyCandidates = await this.fetchSpotifyAutoplayCandidates(seedTrack, 30);
+    const spotifyCandidates = await this.fetchSpotifyAutoplayCandidates(seedTrack, 30, market);
     if (!spotifyCandidates.length) return null;
 
     const filtered = spotifyCandidates.filter((track) => {
@@ -673,10 +740,11 @@ class MusicManager {
 
     const node = queue.player.node || this.getIdealNodeSafe();
     if (!node) return false;
+    const market = this.resolveSpotifyMarket(queue.spotifyMarket || queue.locale || 'it');
 
     let autoTrack = null;
     try {
-      autoTrack = await this.resolveAutoplayTrack(node, seedTrack, seedTrack.requestedBy, queue);
+      autoTrack = await this.resolveAutoplayTrack(node, seedTrack, seedTrack.requestedBy, queue, market);
     } catch (error) {
       logger.warn(`Autoplay related lookup failed for guild ${queue.guildId}: ${error.message || error}`);
       return false;
@@ -743,9 +811,11 @@ class MusicManager {
     }
   }
 
-  async resolvePlayableTracks(node, query, requestedBy) {
+  async resolvePlayableTracks(node, query, requestedBy, options = {}) {
+    const resolvedMarket = this.resolveSpotifyMarket(options.spotifyMarket || options.locale);
+
     if (SpotifyService.isSpotifyUrl(query)) {
-      const resolved = await this.spotify.resolve(query);
+      const resolved = await this.spotify.resolve(query, { market: resolvedMarket });
       const mapped = [];
       const batchSize = 6;
       const requestedCount = resolved.tracks.length;
@@ -805,7 +875,7 @@ class MusicManager {
     };
   }
 
-  async createQueue(interaction, voiceChannel, locale = 'en') {
+  async createQueue(interaction, voiceChannel, locale = 'en', spotifyMarket = null) {
     this.assertLavalinkAvailable();
     const shardId = Number.isInteger(interaction.guild.shardId) ? interaction.guild.shardId : 0;
 
@@ -825,7 +895,8 @@ class MusicManager {
       player,
       defaultVolume: config.music.defaultVolume,
       autoDisconnectMs: config.music.autoDisconnectMs,
-      locale
+      locale,
+      spotifyMarket: this.resolveSpotifyMarket(spotifyMarket || interaction?.locale || interaction?.guildLocale || locale)
     });
 
     this.attachPlayerEvents(queue);
@@ -834,7 +905,7 @@ class MusicManager {
     return queue;
   }
 
-  async createQueueByIds({ guildId, voiceChannelId, textChannelId, locale = 'en' }) {
+  async createQueueByIds({ guildId, voiceChannelId, textChannelId, locale = 'en', spotifyMarket = null }) {
     this.assertLavalinkAvailable();
     const guild = this.client.guilds.cache.get(guildId) || (await this.client.guilds.fetch(guildId).catch(() => null));
     if (!guild) throw new Error('Guild non trovata.');
@@ -857,7 +928,8 @@ class MusicManager {
       player,
       defaultVolume: config.music.defaultVolume,
       autoDisconnectMs: config.music.autoDisconnectMs,
-      locale
+      locale,
+      spotifyMarket: this.resolveSpotifyMarket(spotifyMarket || locale)
     });
 
     this.attachPlayerEvents(queue);
@@ -1136,11 +1208,28 @@ class MusicManager {
     }
   }
 
-  async enqueueQuery({ guildId, query, voiceChannelId, textChannelId, requestedBy, locale = 'en' }) {
+  async enqueueQuery({
+    guildId,
+    query,
+    voiceChannelId,
+    textChannelId,
+    requestedBy,
+    locale = 'en',
+    userLocale = null,
+    spotifyMarket = null
+  }) {
     this.assertLavalinkAvailable();
+    const resolvedSpotifyMarket = this.resolveSpotifyMarket(spotifyMarket || userLocale || locale);
     const existing = this.getQueue(guildId);
     const queue =
-      existing || (await this.createQueueByIds({ guildId, voiceChannelId, textChannelId, locale: normalizeLocale(locale) }));
+      existing ||
+      (await this.createQueueByIds({
+        guildId,
+        voiceChannelId,
+        textChannelId,
+        locale: normalizeLocale(locale),
+        spotifyMarket: resolvedSpotifyMarket
+      }));
 
     if (existing && existing.voiceChannelId !== voiceChannelId) {
       throw new Error('Sono gia attivo in un altro canale vocale.');
@@ -1148,11 +1237,15 @@ class MusicManager {
 
     queue.textChannelId = textChannelId;
     this.setQueueLocale(queue, locale);
+    queue.spotifyMarket = resolvedSpotifyMarket;
 
     const node = queue.player.node || this.getIdealNodeSafe();
     if (!node) throw new Error('Nessun nodo Lavalink disponibile.');
 
-    const resolved = await this.resolvePlayableTracks(node, query, requestedBy);
+    const resolved = await this.resolvePlayableTracks(node, query, requestedBy, {
+      locale,
+      spotifyMarket: resolvedSpotifyMarket
+    });
     if (!resolved.tracks.length) {
       throw new Error('Nessun risultato trovato per la tua richiesta.');
     }
@@ -1184,13 +1277,15 @@ class MusicManager {
 
   async play(interaction, query, voiceChannel) {
     const locale = getInteractionLocale(interaction);
+    const userLocale = interaction?.locale || interaction?.guildLocale || locale;
     const result = await this.enqueueQuery({
       guildId: interaction.guildId,
       query,
       voiceChannelId: voiceChannel.id,
       textChannelId: interaction.channelId,
       requestedBy: interaction.user.id,
-      locale
+      locale,
+      userLocale
     });
 
     if (!interaction.deferred && !interaction.replied) {
@@ -1234,6 +1329,8 @@ class MusicManager {
 
   async join(interaction, voiceChannel) {
     const locale = getInteractionLocale(interaction);
+    const userLocale = interaction?.locale || interaction?.guildLocale || locale;
+    const spotifyMarket = this.resolveSpotifyMarket(userLocale || locale);
     this.assertLavalinkAvailable();
     const existing = this.getQueue(interaction.guildId);
     if (existing) {
@@ -1244,13 +1341,15 @@ class MusicManager {
       existing.joinedByUserId = interaction.user.id;
       existing.joinedAt = Date.now();
       this.setQueueLocale(existing, locale);
+      existing.spotifyMarket = spotifyMarket;
       return { created: false, voiceChannelId: existing.voiceChannelId };
     }
 
-    const queue = await this.createQueue(interaction, voiceChannel, locale);
+    const queue = await this.createQueue(interaction, voiceChannel, locale, spotifyMarket);
     queue.joinedByUserId = interaction.user.id;
     queue.joinedAt = Date.now();
     this.setQueueLocale(queue, locale);
+    queue.spotifyMarket = spotifyMarket;
     return { created: true, voiceChannelId: queue.voiceChannelId };
   }
 
@@ -1640,6 +1739,7 @@ class MusicManager {
   async searchTracks(query, options = {}) {
     const source = options.source || 'spotify';
     const limit = options.limit || 20;
+    const market = this.resolveSpotifyMarket(options.spotifyMarket || options.locale);
 
     if (source === 'spotify') {
       if (!this.spotify.enabled || !this.spotify.api) {
@@ -1648,7 +1748,7 @@ class MusicManager {
 
       const result = await this.spotify.api.searchTracks(query, {
         limit,
-        market: config.spotify.market
+        market
       });
 
       return (result.body?.tracks?.items || []).map((track) => {

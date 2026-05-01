@@ -219,7 +219,7 @@ module.exports = {
                 `Loop(queue): \`${loopingQueue}\``,
                 `Tracks Waiting: \`${totalWaitingTracks}\``,
                 `Avg Volume: \`${averageVolume}%\``,
-                `Spotify API: \`${musicManager?.spotify?.enabled ? 'enabled' : 'disabled'}\` (market: \`${config.spotify.market}\`)`
+                `Spotify API: \`${musicManager?.spotify?.enabled ? 'enabled' : 'disabled'}\` (market mode: \`per-user\`, fallback: \`${config.spotify.market}\`)`
               ].join('\n')
             ),
             inline: true
