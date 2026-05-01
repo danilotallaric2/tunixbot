@@ -90,7 +90,6 @@ const ANNOUNCEMENT_COOKIE = 'tunixbot_announcement_dismissed';
 const LYRICS_SYNC_DELAY_MS = -1000;
 const SERVER_PROGRESS_BACKWARD_TOLERANCE_MS = 350;
 const SERVER_PROGRESS_HARD_RESET_BACKWARD_MS = 3500;
-const SERVER_PROGRESS_MAX_SOFT_BACKSTEP_MS = 120;
 let sessionInfo = null;
 let state = null;
 let canControl = false;
@@ -728,7 +727,8 @@ const syncProgressAnchorFromServer = (s) => {
 
   if (s.paused) {
     const previousMs = progressAnchorMs;
-    progressAnchorMs = serverMs;
+    const allowBackwardWhilePaused = now <= lyricsBackwardSyncUntilTs;
+    progressAnchorMs = allowBackwardWhilePaused ? serverMs : Math.max(previousMs, serverMs);
     progressAnchorTs = now;
     if (serverMs + 250 < previousMs) markLyricsBackwardSyncWindow(1800);
     return;
@@ -784,8 +784,8 @@ const syncProgressAnchorFromServer = (s) => {
     return;
   }
 
-  // Tiny backward adjustments are clamped to avoid visible line "bounce".
-  progressAnchorMs = Math.max(serverMs, liveBeforeSync - SERVER_PROGRESS_MAX_SOFT_BACKSTEP_MS);
+  // Keep visual progress monotonic: accept forward corrections only.
+  progressAnchorMs = Math.max(serverMs, liveBeforeSync);
   progressAnchorTs = now;
   pendingHardBackwardSync = null;
 };

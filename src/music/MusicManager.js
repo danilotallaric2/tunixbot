@@ -211,16 +211,29 @@ class MusicManager {
     if (!queue.current) return 0;
 
     const duration = queue.current.duration || 0;
-    const playerPosition = Number(queue.player?.position);
-    if (Number.isFinite(playerPosition) && playerPosition >= 0) {
-      return duration > 0 ? Math.min(playerPosition, duration) : playerPosition;
-    }
-
     const base = Math.max(0, queue.positionOffsetMs || 0);
     const elapsed = queue.paused ? 0 : Math.max(0, Date.now() - (queue.startedAt || Date.now()));
-    const computed = base + elapsed;
+    let computed = base + elapsed;
+    if (duration > 0) computed = Math.min(computed, duration);
 
-    if (duration > 0) return Math.min(computed, duration);
+    const playerPosition = Number(queue.player?.position);
+    if (Number.isFinite(playerPosition) && playerPosition >= 0) {
+      const safePlayer = duration > 0 ? Math.min(playerPosition, duration) : playerPosition;
+
+      if (queue.paused) {
+        // While paused keep position stable and never move backward due stale node samples.
+        computed = Math.max(base, safePlayer);
+      } else {
+        // Keep progress monotonic: never trust node values that go backward.
+        // If node is clearly ahead, resync local clock forward.
+        const leadMs = safePlayer - computed;
+        if (leadMs > 900) {
+          this.resetPositionClock(queue, safePlayer);
+          computed = safePlayer;
+        }
+      }
+    }
+
     return computed;
   }
 
