@@ -342,6 +342,10 @@ svg {
   transition: all 0.18s ease;
 }
 
+.spotify-lib-item {
+  cursor: pointer;
+}
+
 .spotify-lib-item:hover {
   background: rgba(25, 42, 72, 0.96);
   border-color: rgba(139, 196, 255, 0.42);
@@ -379,6 +383,68 @@ svg {
   border-radius: 10px;
   padding: 12px;
   background: rgba(13, 22, 41, 0.9);
+}
+
+.spotify-playlist-card {
+  max-width: 980px;
+}
+
+.spotify-playlist-tracks {
+  min-height: 320px;
+  max-height: 62vh;
+  overflow: auto;
+  border: 1px solid rgba(112, 169, 244, 0.3);
+  border-radius: 10px;
+  background: rgba(12, 21, 38, 0.9);
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+}
+
+.spotify-playlist-track {
+  display: grid;
+  grid-template-columns: 42px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  background: rgba(16, 29, 51, 0.9);
+  border: 1px solid rgba(104, 156, 232, 0.22);
+  border-radius: 9px;
+  padding: 7px;
+}
+
+.spotify-playlist-track img {
+  width: 42px;
+  height: 42px;
+  border-radius: 7px;
+  object-fit: cover;
+  background: #1f3458;
+}
+
+.spotify-playlist-track-main {
+  min-width: 0;
+}
+
+.spotify-playlist-track-title {
+  font-size: 0.86rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.spotify-playlist-track-sub {
+  margin-top: 2px;
+  font-size: 0.76rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.spotify-playlist-footer {
+  margin-top: 10px;
+  display: flex;
+  justify-content: center;
 }
 
 .queue-author {

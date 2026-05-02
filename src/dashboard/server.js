@@ -391,6 +391,59 @@ const createDashboardServer = (client) => {
     };
   };
 
+  const fetchPlaylistTracksPageFromUserSpotify = async (discordUserId, playlistId, limit = 50, offset = 0) => {
+    const safePlaylistId = String(playlistId || '').trim();
+    if (!safePlaylistId) throw new Error('SPOTIFY_PLAYLIST_ID_MISSING');
+
+    const safeLimit = Math.max(1, Math.min(100, Number(limit || 50)));
+    const safeOffset = Math.max(0, Number(offset || 0));
+
+    const meta = await spotifyApiJsonForUser(
+      discordUserId,
+      `/playlists/${encodeURIComponent(safePlaylistId)}?fields=id,name,images,tracks(total),owner(display_name,id),external_urls(spotify)`
+    );
+
+    const cover = meta?.images?.[0]?.url || null;
+    const page = await spotifyApiJsonForUser(
+      discordUserId,
+      `/playlists/${encodeURIComponent(safePlaylistId)}/tracks?limit=${safeLimit}&offset=${safeOffset}`
+    );
+
+    const items = Array.isArray(page?.items) ? page.items : [];
+    const tracks = [];
+    for (const entry of items) {
+      const track = entry?.track;
+      if (!track || !track.name || !track.external_urls?.spotify) continue;
+      const mapped = client.musicManager.spotify.mapTrack(track, cover);
+      tracks.push({
+        ...mapped,
+        durationText: formatDuration(mapped.duration || 0)
+      });
+    }
+
+    const total = Number(meta?.tracks?.total || 0);
+    const nextOffset = page?.next ? safeOffset + safeLimit : null;
+
+    return {
+      playlist: {
+        id: meta?.id || safePlaylistId,
+        name: meta?.name || 'Spotify Playlist',
+        owner: meta?.owner?.display_name || meta?.owner?.id || '-',
+        image: cover,
+        total,
+        url: meta?.external_urls?.spotify || null
+      },
+      tracks,
+      pagination: {
+        limit: safeLimit,
+        offset: safeOffset,
+        nextOffset,
+        hasMore: Boolean(page?.next),
+        total
+      }
+    };
+  };
+
   const fetchLikedTracksFromUserSpotify = async (discordUserId, maxTracks = 400) => {
     const hardCap = Math.max(1, Math.min(1000, Number(maxTracks || 400)));
     const tracks = [];
@@ -889,6 +942,23 @@ const createDashboardServer = (client) => {
       res.json(payload);
     } catch (error) {
       res.status(500).json({ error: formatApiError(req, error, 'dashboard.spotifyLibraryFailed') });
+    }
+  });
+
+  app.get('/api/spotify/playlist/:playlistId/tracks', requireAuth, requireSpotifyAllowed, async (req, res) => {
+    try {
+      const playlistId = String(req.params?.playlistId || '').trim();
+      if (!playlistId) {
+        res.status(400).json({ error: tr(req, 'dashboard.spotifyPlaylistIdMissing') });
+        return;
+      }
+
+      const limit = Number(req.query?.limit || 50);
+      const offset = Number(req.query?.offset || 0);
+      const payload = await fetchPlaylistTracksPageFromUserSpotify(req.session.user.id, playlistId, limit, offset);
+      res.json(payload);
+    } catch (error) {
+      res.status(500).json({ error: formatApiError(req, error, 'dashboard.spotifyPlaylistTracksFailed') });
     }
   });
 
