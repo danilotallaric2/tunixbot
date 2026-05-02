@@ -468,6 +468,44 @@ const createDashboardServer = (client) => {
     return tracks;
   };
 
+  const fetchLikedTracksPageFromUserSpotify = async (discordUserId, limit = 50, offset = 0) => {
+    const safeLimit = Math.max(1, Math.min(50, Number(limit || 50)));
+    const safeOffset = Math.max(0, Number(offset || 0));
+
+    const page = await spotifyApiJsonForUser(discordUserId, `/me/tracks?limit=${safeLimit}&offset=${safeOffset}`);
+    const items = Array.isArray(page?.items) ? page.items : [];
+    const tracks = [];
+    for (const entry of items) {
+      const track = entry?.track;
+      if (!track || !track.name || !track.external_urls?.spotify) continue;
+      const mapped = client.musicManager.spotify.mapTrack(track);
+      tracks.push({
+        ...mapped,
+        durationText: formatDuration(mapped.duration || 0)
+      });
+    }
+
+    const total = Number(page?.total || 0);
+    const nextOffset = page?.next ? safeOffset + safeLimit : null;
+    return {
+      playlist: {
+        id: 'liked',
+        name: 'Liked Songs',
+        owner: 'Spotify',
+        image: null,
+        total
+      },
+      tracks,
+      pagination: {
+        limit: safeLimit,
+        offset: safeOffset,
+        nextOffset,
+        hasMore: Boolean(page?.next),
+        total
+      }
+    };
+  };
+
   const buildSpotifySectionPayload = async (req) => {
     const discordUserId = req.session?.user?.id;
     const locale = getRequestLocale(req);
@@ -956,6 +994,17 @@ const createDashboardServer = (client) => {
       const limit = Number(req.query?.limit || 50);
       const offset = Number(req.query?.offset || 0);
       const payload = await fetchPlaylistTracksPageFromUserSpotify(req.session.user.id, playlistId, limit, offset);
+      res.json(payload);
+    } catch (error) {
+      res.status(500).json({ error: formatApiError(req, error, 'dashboard.spotifyPlaylistTracksFailed') });
+    }
+  });
+
+  app.get('/api/spotify/liked/tracks', requireAuth, requireSpotifyAllowed, async (req, res) => {
+    try {
+      const limit = Number(req.query?.limit || 50);
+      const offset = Number(req.query?.offset || 0);
+      const payload = await fetchLikedTracksPageFromUserSpotify(req.session.user.id, limit, offset);
       res.json(payload);
     } catch (error) {
       res.status(500).json({ error: formatApiError(req, error, 'dashboard.spotifyPlaylistTracksFailed') });

@@ -1,5 +1,6 @@
 const authGate = document.getElementById('authGate');
 const appRoot = document.getElementById('appRoot');
+const bootSplash = document.getElementById('bootSplash');
 const joinPopup = document.getElementById('joinPopup');
 const toastViewport = document.getElementById('toastViewport');
 const versionPopup = document.getElementById('versionPopup');
@@ -36,6 +37,8 @@ const playlistLoadFill = document.getElementById('playlistLoadFill');
 const playlistLoadMeta = document.getElementById('playlistLoadMeta');
 const playlistLoadCancelBtn = document.getElementById('playlistLoadCancelBtn');
 const statusPill = document.getElementById('statusPill');
+const statusTitleEl = statusPill?.querySelector('.status-title') || null;
+const statusTextEl = statusPill?.querySelector('.status-text') || null;
 const spotifyUserPanel = document.getElementById('spotifyUserPanel');
 const spotifyPanelTitle = document.getElementById('spotifyPanelTitle');
 const spotifyUserLabel = document.getElementById('spotifyUserLabel');
@@ -173,6 +176,9 @@ const I18N = {
       sessionVoice: 'Bot Voice',
       sessionText: 'Text Channel',
       statusReady: 'Ready',
+      statusCardReadyTitle: 'Session Ready',
+      statusCardInfoTitle: 'Session Update',
+      statusCardErrorTitle: 'Session Alert',
       discover: 'Discover',
       discoverSuggested: 'Suggested tracks',
       resultsTitle: 'Search results',
@@ -201,7 +207,7 @@ const I18N = {
       spotifyDisconnect: 'Disconnect',
       spotifyRefresh: 'Refresh',
       spotifyLikedTitle: 'Liked Songs',
-      spotifyQueueLiked: 'Queue Liked Songs',
+      spotifyOpenLiked: 'Open Liked Songs',
       spotifyTracksCount: '{count} tracks',
       spotifyPlaylistsEmpty: 'No playlists found on this account.',
       spotifyPlaylistQueue: 'Queue Playlist',
@@ -210,7 +216,9 @@ const I18N = {
       spotifyQueueTrack: 'Queue Track',
       spotifyPlaylistTracksEmpty: 'No tracks available in this playlist.',
       spotifyPlaylistLoadMore: 'Load More',
-      spotifyPlaylistTitle: 'Playlist'
+      spotifyPlaylistTitle: 'Playlist',
+      spotifyRefreshAria: 'Refresh Spotify library',
+      spotifyDisconnectAria: 'Disconnect Spotify account'
     },
     status: {
       searching: 'Searching...',
@@ -238,6 +246,7 @@ const I18N = {
       spotifyQueuePlaylistStarted: 'Spotify playlist loading started',
       spotifyQueueLikedStarted: 'Liked songs loading started',
       spotifyLoadingPlaylistTracks: 'Loading playlist tracks...',
+      spotifyLoadingLikedTracks: 'Loading liked songs...',
       spotifyTrackQueued: 'Track queued from playlist'
     },
     buttons: {
@@ -297,6 +306,9 @@ const I18N = {
       sessionVoice: 'Vocale Bot',
       sessionText: 'Canale Testo',
       statusReady: 'Pronto',
+      statusCardReadyTitle: 'Sessione Pronta',
+      statusCardInfoTitle: 'Aggiornamento Sessione',
+      statusCardErrorTitle: 'Attenzione Sessione',
       discover: 'Scopri',
       discoverSuggested: 'Brani consigliati',
       resultsTitle: 'Risultati ricerca',
@@ -325,7 +337,7 @@ const I18N = {
       spotifyDisconnect: 'Scollega',
       spotifyRefresh: 'Aggiorna',
       spotifyLikedTitle: 'Brani Preferiti',
-      spotifyQueueLiked: 'Metti Preferiti in Coda',
+      spotifyOpenLiked: 'Apri Preferiti',
       spotifyTracksCount: '{count} brani',
       spotifyPlaylistsEmpty: 'Nessuna playlist trovata su questo account.',
       spotifyPlaylistQueue: 'Metti Playlist in Coda',
@@ -334,7 +346,9 @@ const I18N = {
       spotifyQueueTrack: 'Metti Brano in Coda',
       spotifyPlaylistTracksEmpty: 'Nessun brano disponibile in questa playlist.',
       spotifyPlaylistLoadMore: 'Carica altri',
-      spotifyPlaylistTitle: 'Playlist'
+      spotifyPlaylistTitle: 'Playlist',
+      spotifyRefreshAria: 'Aggiorna libreria Spotify',
+      spotifyDisconnectAria: 'Scollega account Spotify'
     },
     status: {
       searching: 'Ricerca in corso...',
@@ -362,6 +376,7 @@ const I18N = {
       spotifyQueuePlaylistStarted: 'Caricamento playlist Spotify avviato',
       spotifyQueueLikedStarted: 'Caricamento preferiti avviato',
       spotifyLoadingPlaylistTracks: 'Caricamento brani playlist...',
+      spotifyLoadingLikedTracks: 'Caricamento preferiti...',
       spotifyTrackQueued: 'Brano messo in coda dalla playlist'
     },
     buttons: {
@@ -472,6 +487,11 @@ const setText = (selector, text) => {
   if (el) el.textContent = text;
 };
 
+const setBootLoadingVisible = (visible) => {
+  if (!bootSplash) return;
+  bootSplash.classList.toggle('hidden', !visible);
+};
+
 const applyLocale = (locale) => {
   currentLocale = normalizeLocale(locale);
   document.documentElement.lang = currentLocale;
@@ -530,7 +550,8 @@ const applyLocale = (locale) => {
     bold.textContent = value;
     label.appendChild(bold);
   });
-  if (statusPill?.querySelector('.status-text')) statusPill.querySelector('.status-text').textContent = tr('ui.statusReady');
+  if (statusTextEl) statusTextEl.textContent = tr('connection.ready');
+  if (statusTitleEl) statusTitleEl.textContent = tr('ui.statusCardReadyTitle');
 
   setText('.left-col .section-title', tr('ui.sessionTitle'));
   const sessionRows = document.querySelectorAll('.session-row span');
@@ -546,9 +567,15 @@ const applyLocale = (locale) => {
   setText('#spotifyPanelTitle', tr('ui.spotifyPanelTitle'));
   setText('#spotifyLikedTitle', tr('ui.spotifyLikedTitle'));
   if (spotifyConnectBtn) spotifyConnectBtn.textContent = tr('ui.spotifyConnect');
-  if (spotifyDisconnectBtn) spotifyDisconnectBtn.textContent = tr('ui.spotifyDisconnect');
-  if (spotifyRefreshBtn) spotifyRefreshBtn.textContent = tr('ui.spotifyRefresh');
-  if (spotifyQueueLikedBtn) spotifyQueueLikedBtn.textContent = tr('ui.spotifyQueueLiked');
+  if (spotifyDisconnectBtn) {
+    spotifyDisconnectBtn.setAttribute('aria-label', tr('ui.spotifyDisconnectAria'));
+    spotifyDisconnectBtn.title = tr('ui.spotifyDisconnect');
+  }
+  if (spotifyRefreshBtn) {
+    spotifyRefreshBtn.setAttribute('aria-label', tr('ui.spotifyRefreshAria'));
+    spotifyRefreshBtn.title = tr('ui.spotifyRefresh');
+  }
+  if (spotifyQueueLikedBtn) spotifyQueueLikedBtn.textContent = tr('ui.spotifyOpenLiked');
   if (spotifyPlaylistLoadMoreBtn) spotifyPlaylistLoadMoreBtn.textContent = tr('ui.spotifyPlaylistLoadMore');
   if (spotifyPlaylistCloseBtn) spotifyPlaylistCloseBtn.textContent = tr('ui.close');
   if (spotifyPlaylistTitle && !spotifySelectedPlaylist) spotifyPlaylistTitle.textContent = tr('ui.spotifyPlaylistTitle');
@@ -594,14 +621,14 @@ const dismissVersionPopup = () => {
 
 const setConnectionStatus = (text, isError = false) => {
   if (!statusPill) return;
-  const message = String(text || '');
+  const message = String(text || tr('connection.ready'));
 
-  const statusTextEl = statusPill.querySelector('.status-text');
   if (statusTextEl) statusTextEl.textContent = message;
   else statusPill.textContent = message;
 
   statusPill.classList.remove('status-ok', 'status-error', 'status-info');
   if (isError) {
+    if (statusTitleEl) statusTitleEl.textContent = tr('ui.statusCardErrorTitle');
     statusPill.classList.add('status-error');
     return;
   }
@@ -611,8 +638,10 @@ const setConnectionStatus = (text, isError = false) => {
     normalized.includes(tr('connection.ready').toLowerCase()) ||
     normalized === tr('ui.statusReady').toLowerCase()
   ) {
+    if (statusTitleEl) statusTitleEl.textContent = tr('ui.statusCardReadyTitle');
     statusPill.classList.add('status-ok');
   } else {
+    if (statusTitleEl) statusTitleEl.textContent = tr('ui.statusCardInfoTitle');
     statusPill.classList.add('status-info');
   }
 };
@@ -1249,7 +1278,6 @@ const renderSpotifyLibrary = (payload) => {
         <div class="spotify-lib-title">${playlist.name || '-'}</div>
         <div class="spotify-lib-sub">${playlist.owner || '-'} • ${tr('ui.spotifyTracksCount', { count: Number(playlist.tracksTotal || 0) })}</div>
         <div class="spotify-lib-actions">
-          <button class="queue-action-btn" data-spotify-playlist-open="${playlist.id}">${tr('ui.spotifyOpenPlaylist')}</button>
           <button class="queue-action-btn" data-spotify-playlist-id="${playlist.id}">${tr('ui.spotifyPlaylistQueue')}</button>
         </div>
       </div>
@@ -1302,13 +1330,18 @@ const renderSpotifyPlaylistTracks = (payload, { append = false } = {}) => {
 const loadSpotifyPlaylistTracks = async (playlistId, { offset = 0, append = false } = {}) => {
   if (!playlistId) return;
   if (!append) {
-    spotifyPlaylistTracks.innerHTML = `<div class="queue-author">${tr('status.spotifyLoadingPlaylistTracks')}</div>`;
+    const loadingLabel =
+      playlistId === 'liked' ? tr('status.spotifyLoadingLikedTracks') : tr('status.spotifyLoadingPlaylistTracks');
+    spotifyPlaylistTracks.innerHTML = `<div class="queue-author">${loadingLabel}</div>`;
   }
 
   try {
-    const payload = await api(
-      `/api/spotify/playlist/${encodeURIComponent(playlistId)}/tracks?limit=50&offset=${Math.max(0, Number(offset || 0))}`
-    );
+    const safeOffset = Math.max(0, Number(offset || 0));
+    const requestUrl =
+      playlistId === 'liked'
+        ? `/api/spotify/liked/tracks?limit=50&offset=${safeOffset}`
+        : `/api/spotify/playlist/${encodeURIComponent(playlistId)}/tracks?limit=50&offset=${safeOffset}`;
+    const payload = await api(requestUrl);
     renderSpotifyPlaylistTracks(payload, { append });
   } catch (error) {
     if (!append) {
@@ -1334,6 +1367,23 @@ const openSpotifyPlaylist = async (playlist) => {
   spotifyPlaylistTitle.textContent = spotifySelectedPlaylist.name || tr('ui.spotifyPlaylistTitle');
   spotifyPlaylistMeta.textContent = `${spotifySelectedPlaylist.owner} • ${tr('ui.spotifyTracksCount', { count: spotifySelectedPlaylist.total })}`;
   await loadSpotifyPlaylistTracks(playlistId, { offset: 0, append: false });
+};
+
+const openSpotifyLikedSongs = async () => {
+  const likedCount = Number(spotifyLibrary?.likedCount || 0);
+  spotifySelectedPlaylist = {
+    id: 'liked',
+    name: tr('ui.spotifyLikedTitle'),
+    owner: 'Spotify',
+    total: likedCount,
+    image: '',
+    kind: 'liked'
+  };
+
+  setSpotifyPlaylistOpen(true);
+  spotifyPlaylistTitle.textContent = spotifySelectedPlaylist.name;
+  spotifyPlaylistMeta.textContent = `Spotify • ${tr('ui.spotifyTracksCount', { count: likedCount })}`;
+  await loadSpotifyPlaylistTracks('liked', { offset: 0, append: false });
 };
 
 const loadSpotifyLibrary = async ({ notify = false } = {}) => {
@@ -1519,12 +1569,13 @@ const loadMe = async () => {
     authGate.classList.remove('hidden');
     appRoot.classList.add('hidden');
     hideJoinPopup();
+    setBootLoadingVisible(false);
     return null;
   }
 
   applyLocale(me.locale || me.user?.locale || 'en');
   authGate.classList.add('hidden');
-  appRoot.classList.remove('hidden');
+  appRoot.classList.add('hidden');
 
   userAvatar.src = me.user.avatarUrl || '';
   userName.textContent = me.user.globalName || me.user.username;
@@ -1681,6 +1732,7 @@ const startPollingLoop = () => {
 };
 
 const bootstrap = async () => {
+  setBootLoadingVisible(true);
   const user = await loadMe();
   if (!user) return;
 
@@ -1696,14 +1748,30 @@ const bootstrap = async () => {
     chips.appendChild(btn);
   }
 
-  await refreshSession();
-  await loadDiscover();
+  try {
+    await refreshSession();
+  } catch (error) {
+    setStatus(error.message, true);
+  }
+
+  try {
+    await loadDiscover();
+  } catch (error) {
+    setStatus(error.message, true);
+  }
+
   if (spotifyAllowed) {
-    await loadSpotifyLibrary({ notify: false });
+    try {
+      await loadSpotifyLibrary({ notify: false });
+    } catch (error) {
+      setStatus(error.message, true);
+    }
   }
   setViewMode('discover');
   updateSourceBadge();
   showVersionPopupIfNeeded();
+  appRoot.classList.remove('hidden');
+  setBootLoadingVisible(false);
 
   startPollingLoop();
 
@@ -1897,29 +1965,13 @@ spotifyDisconnectBtn?.addEventListener('click', async () => {
 });
 
 spotifyQueueLikedBtn?.addEventListener('click', () => {
-  queueSpotifyLikedSongs();
+  openSpotifyLikedSongs();
 });
 
 spotifyLibraryList?.addEventListener('click', (event) => {
   const target = event.target;
   if (!(target instanceof Element)) return;
   const item = target.closest('.spotify-lib-item');
-
-  const openBtn = target.closest('[data-spotify-playlist-open]');
-  if (openBtn instanceof HTMLElement) {
-    const playlistId = String(openBtn.dataset.spotifyPlaylistOpen || '').trim();
-    if (!playlistId) return;
-
-    const playlist = {
-      id: playlistId,
-      name: item?.dataset.spotifyPlaylistName || '',
-      owner: item?.dataset.spotifyPlaylistOwner || '-',
-      tracksTotal: Number(item?.dataset.spotifyPlaylistTotal || 0),
-      image: item?.dataset.spotifyPlaylistImage || ''
-    };
-    openSpotifyPlaylist(playlist);
-    return;
-  }
 
   const playlistBtn = target.closest('[data-spotify-playlist-id]');
   if (playlistBtn instanceof HTMLElement) {
@@ -2018,5 +2070,8 @@ logoutBtn.addEventListener('click', async () => {
 });
 
 bootstrap().catch((error) => {
+  setBootLoadingVisible(false);
+  if (!userName?.textContent) authGate.classList.remove('hidden');
+  else appRoot.classList.remove('hidden');
   setStatus(error.message, true);
 });
