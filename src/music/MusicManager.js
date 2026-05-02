@@ -645,6 +645,54 @@ class MusicManager {
     return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
   }
 
+  sanitizeVoiceChannelStatus(value) {
+    if (value === null) return null;
+    const text = String(value || '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!text) return '';
+    return text.slice(0, 120);
+  }
+
+  formatTrackVoiceChannelStatus(track) {
+    if (!track) return null;
+    const title = this.sanitizeVoiceChannelStatus(track.title || '');
+    if (!title) return null;
+    return `🎵 ${title}`;
+  }
+
+  async setVoiceChannelStatus(queue, statusText) {
+    if (!queue?.voiceChannelId) return false;
+    const normalized = this.sanitizeVoiceChannelStatus(statusText);
+    const cacheKey = `${queue.voiceChannelId}:${normalized === null ? '__CLEARED__' : normalized}`;
+    if (queue.lastVoiceChannelStatus === cacheKey) return true;
+
+    const body = normalized === null ? { status: null } : { status: normalized };
+
+    try {
+      await this.client.rest.put(`/channels/${queue.voiceChannelId}/voice-status`, { body });
+      queue.lastVoiceChannelStatus = cacheKey;
+      return true;
+    } catch (error) {
+      const code = Number(error?.code || 0);
+      const status = Number(error?.status || 0);
+      const ignorable = code === 50013 || code === 50001 || status === 403 || status === 404;
+
+      if (!ignorable) {
+        logger.warn(
+          `Voice status update failed (guild=${queue.guildId} channel=${queue.voiceChannelId}): ${error?.message || error}`
+        );
+      }
+      return false;
+    }
+  }
+
+  async clearVoiceChannelStatus(queue) {
+    const cleared = await this.setVoiceChannelStatus(queue, null);
+    if (cleared) return true;
+    return this.setVoiceChannelStatus(queue, '');
+  }
+
   isPlaylistLoadRunning(queue) {
     return Boolean(queue?.playlistLoadJob?.active);
   }
@@ -1733,6 +1781,7 @@ class MusicManager {
       queue.clearTrackStartTimeout();
       this.resetPositionClock(queue, 0);
       queue.paused = false;
+      await this.setVoiceChannelStatus(queue, this.formatTrackVoiceChannelStatus(queue.current));
 
       // Prefetch synced lyrics server-side as soon as playback starts,
       // so dashboard /api/lyrics is usually hot from cache.
@@ -1864,6 +1913,7 @@ class MusicManager {
       }
 
       queue.current = null;
+      await this.clearVoiceChannelStatus(queue);
       await this.markNowPlayingAsEnded(queue, t(this.resolveQueueLocale(queue), 'embeds.nowPlayingEnded'));
       this.scheduleSessionStateSave();
       return;
@@ -1941,6 +1991,7 @@ class MusicManager {
       if (movedFromTracked) {
         queue.voiceChannelId = newState.channelId;
         queue.clearDisconnectTimer();
+        await this.setVoiceChannelStatus(queue, this.formatTrackVoiceChannelStatus(queue.current));
         this.scheduleSessionStateSave();
       } else if (disconnectedFromTracked) {
         const locale = this.resolveQueueLocale(queue);
@@ -1983,6 +2034,7 @@ class MusicManager {
       queue.clearNowPlayingTimer();
       queue.clearTrackStartTimeout();
       queue.clearPlaylistLoadCleanupTimer?.();
+      await this.clearVoiceChannelStatus(queue);
       if (deleteNowPlayingMessage && queue.nowPlayingMessageId) {
         const channel = await this.client.channels.fetch(queue.textChannelId).catch(() => null);
         if (channel && channel.isTextBased()) {
@@ -2148,7 +2200,13 @@ class MusicManager {
 
     const toAdd = resolved.tracks.slice(0, available);
     const willStartImmediately = !queue.current;
-    queue.tracks.push(...toAdd);
+    const isSingleTrackRequest = resolved.sourceKind === 'track' && toAdd.length === 1;
+    const shouldPrioritizeSingleTrack = isSingleTrackRequest && (queue.current || queue.tracks.length > 0);
+    if (shouldPrioritizeSingleTrack) {
+      queue.tracks.unshift(toAdd[0]);
+    } else {
+      queue.tracks.push(...toAdd);
+    }
 
     if (willStartImmediately) {
       await this.playNext(queue);
@@ -2374,6 +2432,7 @@ class MusicManager {
       await queue.player.stopTrack().catch(() => null);
     }
 
+    await this.clearVoiceChannelStatus(queue);
     await this.markNowPlayingAsEnded(queue, t(locale, 'embeds.nowPlayingStopped'));
 
     const channel = await this.client.channels.fetch(queue.voiceChannelId).catch(() => null);

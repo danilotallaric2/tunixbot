@@ -31,6 +31,7 @@ class GuildQueue {
     this.currentStarted = false;
     this.trackStartTimeout = null;
     this.nowPlayingUpdateTimer = null;
+    this.lastVoiceChannelStatus = null;
     this.recentTrackKeys = [];
     this.joinedByUserId = null;
     this.joinedAt = 0;
