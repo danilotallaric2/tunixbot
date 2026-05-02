@@ -300,6 +300,12 @@ svg {
   font-weight: 800;
 }
 
+.spotify-user-head svg {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+
 .spotify-user-label {
   color: var(--muted);
   font-size: 0.82rem;
@@ -307,7 +313,14 @@ svg {
 
 .spotify-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+}
+
+#spotifyAuthRow .ctl {
+  height: 32px;
+  padding: 0 12px;
+  font-size: 0.76rem;
 }
 
 .spotify-library-list {
@@ -492,11 +505,15 @@ svg {
 .queue-action-btn,
 .icon-btn {
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   height: 40px;
   padding: 0 14px;
   color: #f6fbff;
   background: rgba(13, 24, 45, 0.9);
   border-color: rgba(108, 156, 230, 0.24);
+  text-decoration: none;
   transition: all 0.18s ease;
 }
 

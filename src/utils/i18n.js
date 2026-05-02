@@ -128,6 +128,18 @@ const dictionaries = {
       invalidLoopMode: 'Invalid loop mode',
       unsupportedAction: 'Unsupported action',
       spotifyRequestError: 'Spotify request failed.',
+      spotifyNotAllowed: 'Spotify section is not enabled for your account.',
+      spotifyFeatureDisabled: 'Spotify user login is not configured on this dashboard.',
+      spotifyNotConnected: 'Spotify account not connected.',
+      spotifyOauthIncomplete: 'Incomplete Spotify OAuth callback.',
+      spotifyOauthStateInvalid: 'Invalid Spotify OAuth state.',
+      spotifyOauthFailed: 'Spotify login failed: {error}',
+      spotifyLibraryFailed: 'Spotify library error',
+      spotifyQueuePlaylistFailed: 'Failed to queue Spotify playlist',
+      spotifyQueueLikedFailed: 'Failed to queue liked songs',
+      spotifyPlaylistIdMissing: 'Missing Spotify playlist ID.',
+      spotifyLikedEmpty: 'No liked songs found on this Spotify account.',
+      spotifyLikedSongsName: 'Liked Songs',
       lyricsNotFound: 'Lyrics not found.',
       lyricsNotAvailableForTrack: 'Lyrics are not available for this track.',
       unknownVoice: 'Unknown Voice',
@@ -287,6 +299,18 @@ const dictionaries = {
       invalidLoopMode: 'Loop mode non valido',
       unsupportedAction: 'Azione non supportata',
       spotifyRequestError: 'Errore richiesta Spotify.',
+      spotifyNotAllowed: 'La sezione Spotify non e abilitata per il tuo account.',
+      spotifyFeatureDisabled: 'Login Spotify utente non configurato su questa dashboard.',
+      spotifyNotConnected: 'Account Spotify non collegato.',
+      spotifyOauthIncomplete: 'Callback OAuth Spotify incompleto.',
+      spotifyOauthStateInvalid: 'State OAuth Spotify non valido.',
+      spotifyOauthFailed: 'Login Spotify fallito: {error}',
+      spotifyLibraryFailed: 'Errore libreria Spotify',
+      spotifyQueuePlaylistFailed: 'Impossibile mettere in coda la playlist Spotify',
+      spotifyQueueLikedFailed: 'Impossibile mettere in coda i brani preferiti',
+      spotifyPlaylistIdMissing: 'ID playlist Spotify mancante.',
+      spotifyLikedEmpty: 'Nessun brano preferito trovato su questo account Spotify.',
+      spotifyLikedSongsName: 'Brani Preferiti',
       lyricsNotFound: 'Lyrics non trovate.',
       lyricsNotAvailableForTrack: 'Lyrics non disponibili per questo brano.',
       unknownVoice: 'Unknown Voice',
@@ -421,6 +445,18 @@ const knownErrorMap = {
   'Spotify API non raggiungibile in questo momento. Riprova tra poco.': {
     it: 'Spotify API non raggiungibile in questo momento. Riprova tra poco.',
     en: 'Spotify API is currently unreachable. Please try again shortly.'
+  },
+  SPOTIFY_NOT_CONNECTED: {
+    it: 'Account Spotify non collegato.',
+    en: 'Spotify account not connected.'
+  },
+  SPOTIFY_REFRESH_TOKEN_MISSING: {
+    it: 'Refresh token Spotify mancante. Ricollega il tuo account Spotify.',
+    en: 'Spotify refresh token missing. Please reconnect your Spotify account.'
+  },
+  SPOTIFY_PLAYLIST_ID_MISSING: {
+    it: 'ID playlist Spotify mancante.',
+    en: 'Missing Spotify playlist ID.'
   },
   'Loop mode non valido': {
     it: 'Loop mode non valido',

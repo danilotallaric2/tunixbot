@@ -941,6 +941,93 @@ class MusicManager {
     this.finalizePlaylistLoadJob(queue, job, 'completed');
   }
 
+  async startSpotifyTrackListLoad(queue, job, spotifyTracks, requestedBy) {
+    const node = queue.player.node || this.getIdealNodeSafe();
+    if (!node) {
+      this.finalizePlaylistLoadJob(queue, job, 'failed', {
+        error: 'Nessun nodo Lavalink disponibile.'
+      });
+      return;
+    }
+
+    if (!Array.isArray(spotifyTracks) || !spotifyTracks.length) {
+      this.finalizePlaylistLoadJob(queue, job, 'failed', {
+        error: 'Nessun brano trovato nella playlist.'
+      });
+      return;
+    }
+
+    const concurrency = Math.max(1, Number(MusicManager.PLAYLIST_RESOLVE_CONCURRENCY || 1));
+    for (let batchStart = 0; batchStart < spotifyTracks.length; batchStart += concurrency) {
+      if (!this.queues.has(queue.guildId) || queue.playlistLoadJob !== job) return;
+      if (job.cancelRequested) {
+        this.finalizePlaylistLoadJob(queue, job, 'cancelled');
+        return;
+      }
+
+      const batch = spotifyTracks.slice(batchStart, batchStart + concurrency);
+      const batchResolved = await Promise.all(
+        batch.map(async (spotifyTrack) => {
+          try {
+            return await this.resolveSingleSpotifyTrack(node, spotifyTrack, requestedBy);
+          } catch (error) {
+            logger.warn(`Spotify track-list resolve failed (${queue.guildId}): ${error.message || error}`);
+            return null;
+          }
+        })
+      );
+
+      for (let i = 0; i < batchResolved.length; i += 1) {
+        if (!this.queues.has(queue.guildId) || queue.playlistLoadJob !== job) return;
+        if (job.cancelRequested) {
+          this.finalizePlaylistLoadJob(queue, job, 'cancelled');
+          return;
+        }
+
+        const absoluteIndex = batchStart + i;
+        const resolvedTrack = batchResolved[i];
+        let added = false;
+        if (resolvedTrack) {
+          try {
+            added = await this.queuePlaylistTrackWithProgress(queue, job, resolvedTrack);
+          } catch (error) {
+            logger.warn(`Spotify track-list queue push failed (${queue.guildId}): ${error.message || error}`);
+          }
+        }
+
+        if (!added && !resolvedTrack) {
+          job.skipped += 1;
+        } else if (!added) {
+          const remaining = spotifyTracks.length - job.processed;
+          job.skipped += Math.max(1, remaining);
+          job.processed = spotifyTracks.length;
+          this.updatePlaylistLoadJob(job, {
+            message: `Queue limit reached (${config.music.maxQueueSize})`
+          });
+          this.finalizePlaylistLoadJob(queue, job, 'completed');
+          return;
+        } else {
+          job.added += 1;
+        }
+
+        job.processed += 1;
+        job.updatedAt = Date.now();
+
+        if (added && absoluteIndex < spotifyTracks.length - 1) {
+          await this.sleep(MusicManager.PLAYLIST_LOAD_ADD_INTERVAL_MS);
+        }
+      }
+    }
+
+    if (!this.queues.has(queue.guildId) || queue.playlistLoadJob !== job) return;
+    if (job.cancelRequested) {
+      this.finalizePlaylistLoadJob(queue, job, 'cancelled');
+      return;
+    }
+
+    this.finalizePlaylistLoadJob(queue, job, 'completed');
+  }
+
   buildTrack(rawTrack, requestedBy, metadata = null) {
     const info = rawTrack.info || {};
 
@@ -2052,6 +2139,87 @@ class MusicManager {
       skippedCount: Math.max(0, resolved.skippedCount || 0),
       firstTrack: toAdd[0] || null,
       willStartImmediately
+    };
+  }
+
+  async enqueueSpotifyTrackList({
+    guildId,
+    voiceChannelId,
+    textChannelId,
+    requestedBy,
+    spotifyTracks,
+    locale = 'en',
+    userLocale = null,
+    spotifyMarket = null,
+    sourceKind = 'playlist',
+    playlistName = null
+  }) {
+    this.assertLavalinkAvailable();
+    const resolvedSpotifyMarket = this.resolveSpotifyMarket(spotifyMarket || userLocale || locale);
+    const existing = this.getQueue(guildId);
+    const queue =
+      existing ||
+      (await this.createQueueByIds({
+        guildId,
+        voiceChannelId,
+        textChannelId,
+        locale: normalizeLocale(locale),
+        spotifyMarket: resolvedSpotifyMarket
+      }));
+
+    if (existing && existing.voiceChannelId !== voiceChannelId) {
+      throw new Error('Sono gia attivo in un altro canale vocale.');
+    }
+
+    queue.textChannelId = textChannelId;
+    this.setQueueLocale(queue, locale);
+    queue.spotifyMarket = resolvedSpotifyMarket;
+    this.scheduleSessionStateSave();
+
+    if (this.isPlaylistLoadRunning(queue)) {
+      throw new Error('E gia in corso un caricamento playlist. Annullalo prima di iniziarne un altro.');
+    }
+
+    const normalizedTracks = Array.isArray(spotifyTracks) ? spotifyTracks.filter((track) => track && track.title) : [];
+    if (!normalizedTracks.length) throw new Error('Nessun brano trovato nella playlist.');
+
+    const currentSize = this.getQueueCurrentSize(queue);
+    const available = config.music.maxQueueSize - currentSize;
+    if (available <= 0) {
+      throw new Error(`Coda piena. Limite massimo: ${config.music.maxQueueSize} brani.`);
+    }
+
+    const cappedTracks = normalizedTracks.slice(0, available);
+    const cappedByQueueLimit = Math.max(0, normalizedTracks.length - cappedTracks.length);
+    if (!cappedTracks.length) {
+      throw new Error(`Coda piena. Limite massimo: ${config.music.maxQueueSize} brani.`);
+    }
+
+    const job = this.createPlaylistLoadJob(queue, {
+      status: 'running',
+      sourceKind: String(sourceKind || 'playlist'),
+      playlistName: playlistName || null,
+      total: cappedTracks.length,
+      requestedCount: normalizedTracks.length
+    });
+
+    this.startSpotifyTrackListLoad(queue, job, cappedTracks, requestedBy).catch((error) => {
+      logger.error(`Spotify track-list load failed (${queue.guildId})`, error);
+      this.finalizePlaylistLoadJob(queue, job, 'failed', {
+        error: error?.message || String(error)
+      });
+    });
+
+    return {
+      loading: true,
+      addedCount: 0,
+      sourceKind: job.sourceKind,
+      playlistName: job.playlistName,
+      requestedCount: normalizedTracks.length,
+      skippedCount: cappedByQueueLimit,
+      firstTrack: null,
+      willStartImmediately: !queue.current,
+      playlistLoad: this.buildPlaylistLoadSnapshot(job)
     };
   }
 

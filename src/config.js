@@ -13,6 +13,12 @@ const parseIntOr = (value, fallback) => {
   return Number.isNaN(n) ? fallback : n;
 };
 
+const parseList = (value) =>
+  String(value || '')
+    .split(/[\s,;]+/g)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
 const trimTrailingSlash = (value) => String(value || '').replace(/\/+$/, '');
 
 const fallbackDashboardPublicUrl = () =>
@@ -46,7 +52,15 @@ const config = {
   spotify: {
     clientId: process.env.SPOTIFY_CLIENT_ID,
     clientSecret: process.env.SPOTIFY_CLIENT_SECRET,
-    market: process.env.SPOTIFY_MARKET || 'IT'
+    market: process.env.SPOTIFY_MARKET || 'IT',
+    redirectUri: process.env.SPOTIFY_REDIRECT_URI || buildDefaultOAuthRedirect('/auth/spotify/callback'),
+    scopes: parseList(
+      process.env.SPOTIFY_SCOPES ||
+        'user-read-private user-read-email playlist-read-private playlist-read-collaborative user-library-read'
+    ),
+    dashboardAllowedDiscordIds: parseList(process.env.SPOTIFY_DASHBOARD_ALLOWED_DISCORD_IDS || ''),
+    dashboardUsersFile:
+      process.env.SPOTIFY_DASHBOARD_USERS_FILE || path.join(__dirname, 'data', 'spotify-users.json')
   },
   music: {
     defaultVolume: parseIntOr(process.env.DEFAULT_VOLUME, 80),

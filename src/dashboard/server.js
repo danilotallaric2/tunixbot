@@ -7,13 +7,17 @@ const config = require('../config');
 const logger = require('../utils/logger');
 const { formatDuration } = require('../utils/time');
 const JsonSessionStore = require('./jsonSessionStore');
+const SpotifyUserStore = require('./spotifyUserStore');
 const { normalizeLocale, t, localizeErrorMessage } = require('../utils/i18n');
 
 const DISCORD_API = 'https://discord.com/api/v10';
+const SPOTIFY_ACCOUNTS_API = 'https://accounts.spotify.com/api';
+const SPOTIFY_WEB_API = 'https://api.spotify.com/v1';
 const LRCLIB_API = 'https://lrclib.net/api/get';
 const LYRICS_CACHE_MAX_ENTRIES = 500;
 const LYRICS_CACHE_SUCCESS_TTL_MS = 1000 * 60 * 60 * 12;
 const LYRICS_CACHE_NOT_FOUND_TTL_MS = 1000 * 60 * 10;
+const SPOTIFY_TOKEN_EXPIRY_SAFETY_MS = 60_000;
 
 const parseLoopMode = (value) => {
   if (!value) return null;
@@ -156,6 +160,305 @@ const createDashboardServer = (client) => {
       return;
     }
     next();
+  };
+
+  const spotifyAllowedDiscordIds = new Set((config.spotify.dashboardAllowedDiscordIds || []).map((id) => String(id)));
+  const spotifyScopes = Array.isArray(config.spotify.scopes) ? config.spotify.scopes.filter(Boolean) : [];
+  const spotifyUserStore = new SpotifyUserStore(config.spotify.dashboardUsersFile);
+  const spotifyOauthReady = Boolean(
+    config.spotify.clientId && config.spotify.clientSecret && config.spotify.redirectUri && spotifyScopes.length
+  );
+
+  const isSpotifyAllowedUserId = (discordUserId) => spotifyAllowedDiscordIds.has(String(discordUserId || ''));
+  const isSpotifyFeatureEnabledForUser = (discordUserId) => spotifyOauthReady && isSpotifyAllowedUserId(discordUserId);
+
+  const requireSpotifyAllowed = (req, res, next) => {
+    const discordUserId = req.session?.user?.id;
+    if (!isSpotifyFeatureEnabledForUser(discordUserId)) {
+      res.status(403).json({ error: tr(req, 'dashboard.spotifyNotAllowed') });
+      return;
+    }
+    next();
+  };
+
+  const spotifyTokenRequest = async (params) => {
+    const body = new URLSearchParams(params);
+    const basic = Buffer.from(`${config.spotify.clientId}:${config.spotify.clientSecret}`).toString('base64');
+
+    const response = await fetch(`${SPOTIFY_ACCOUNTS_API}/token`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${basic}`,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body
+    });
+
+    const raw = await response.text();
+    let parsed = {};
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      parsed = {};
+    }
+
+    if (!response.ok) {
+      const reason = parsed.error_description || parsed.error || raw || `HTTP ${response.status}`;
+      throw new Error(`Spotify token error: ${reason}`);
+    }
+
+    return parsed;
+  };
+
+  const fetchSpotifyProfileByToken = async (accessToken) => {
+    const response = await fetch(`${SPOTIFY_WEB_API}/me`, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+
+    if (!response.ok) {
+      const raw = await response.text();
+      throw new Error(`Spotify profile error: ${raw || response.statusText}`);
+    }
+
+    return response.json();
+  };
+
+  const mapSpotifyProfile = (profile) => ({
+    spotifyUserId: profile?.id || null,
+    displayName: profile?.display_name || profile?.id || 'Spotify User',
+    country: profile?.country || null,
+    avatarUrl: profile?.images?.[0]?.url || null
+  });
+
+  const storeSpotifyUserAuth = async (discordUserId, tokenData, profile = null) => {
+    const existing = spotifyUserStore.get(discordUserId) || {};
+    const profileData = profile
+      ? mapSpotifyProfile(profile)
+      : {
+          spotifyUserId: existing.spotifyUserId || null,
+          displayName: existing.displayName || 'Spotify User',
+          country: existing.country || null,
+          avatarUrl: existing.avatarUrl || null
+        };
+    const now = Date.now();
+    const expiresIn = Math.max(60, Number(tokenData?.expires_in || 3600));
+    const expiresAt = now + expiresIn * 1000;
+
+    const stored = {
+      spotifyUserId: profileData.spotifyUserId,
+      displayName: profileData.displayName,
+      country: profileData.country,
+      avatarUrl: profileData.avatarUrl,
+      accessToken: tokenData?.access_token || existing.accessToken || null,
+      refreshToken: tokenData?.refresh_token || existing.refreshToken || null,
+      tokenType: tokenData?.token_type || existing.tokenType || 'Bearer',
+      scope: tokenData?.scope || existing.scope || spotifyScopes.join(' '),
+      expiresAt,
+      linkedAt: Number(existing.linkedAt || now),
+      updatedAt: now
+    };
+
+    await spotifyUserStore.set(discordUserId, stored);
+    return stored;
+  };
+
+  const storeSpotifyUserProfile = async (discordUserId, profile) => {
+    const existing = spotifyUserStore.get(discordUserId) || {};
+    const mapped = mapSpotifyProfile(profile);
+    const updated = {
+      ...existing,
+      spotifyUserId: mapped.spotifyUserId,
+      displayName: mapped.displayName,
+      country: mapped.country,
+      avatarUrl: mapped.avatarUrl,
+      updatedAt: Date.now()
+    };
+    await spotifyUserStore.set(discordUserId, updated);
+    return updated;
+  };
+
+  const refreshSpotifyUserAccessToken = async (discordUserId, existing) => {
+    if (!existing?.refreshToken) {
+      throw new Error('SPOTIFY_REFRESH_TOKEN_MISSING');
+    }
+
+    const tokenData = await spotifyTokenRequest({
+      grant_type: 'refresh_token',
+      refresh_token: existing.refreshToken
+    });
+
+    return storeSpotifyUserAuth(discordUserId, tokenData, null);
+  };
+
+  const ensureSpotifyUserToken = async (discordUserId) => {
+    const stored = spotifyUserStore.get(discordUserId);
+    if (!stored?.accessToken) throw new Error('SPOTIFY_NOT_CONNECTED');
+
+    const expiresAt = Number(stored.expiresAt || 0);
+    if (!expiresAt || expiresAt <= Date.now() + SPOTIFY_TOKEN_EXPIRY_SAFETY_MS) {
+      return refreshSpotifyUserAccessToken(discordUserId, stored);
+    }
+
+    return stored;
+  };
+
+  const spotifyApiRequestForUser = async (discordUserId, endpointPath, options = {}, allowRetry = true) => {
+    const auth = await ensureSpotifyUserToken(discordUserId);
+    const url = endpointPath.startsWith('http') ? endpointPath : `${SPOTIFY_WEB_API}${endpointPath}`;
+    const headers = {
+      Authorization: `Bearer ${auth.accessToken}`,
+      ...(options.headers || {})
+    };
+
+    const response = await fetch(url, { ...options, headers });
+    if (response.status === 401 && allowRetry) {
+      await refreshSpotifyUserAccessToken(discordUserId, auth);
+      return spotifyApiRequestForUser(discordUserId, endpointPath, options, false);
+    }
+    return response;
+  };
+
+  const spotifyApiJsonForUser = async (discordUserId, endpointPath, options = {}) => {
+    const response = await spotifyApiRequestForUser(discordUserId, endpointPath, options, true);
+    const raw = await response.text();
+    let parsed = {};
+    try {
+      parsed = raw ? JSON.parse(raw) : {};
+    } catch {
+      parsed = {};
+    }
+
+    if (!response.ok) {
+      const reason = parsed.error?.message || parsed.error_description || raw || response.statusText;
+      throw new Error(`Spotify API error: ${reason}`);
+    }
+    return parsed;
+  };
+
+  const fetchUserPlaylists = async (discordUserId, limit = 24) => {
+    const safeLimit = Math.max(1, Math.min(50, Number(limit || 24)));
+    const payload = await spotifyApiJsonForUser(discordUserId, `/me/playlists?limit=${safeLimit}&offset=0`);
+    const items = Array.isArray(payload?.items) ? payload.items : [];
+
+    return items.map((playlist) => ({
+      id: playlist.id,
+      name: playlist.name,
+      owner: playlist.owner?.display_name || playlist.owner?.id || '-',
+      tracksTotal: Number(playlist.tracks?.total || 0),
+      image: playlist.images?.[0]?.url || null,
+      url: playlist.external_urls?.spotify || null,
+      isPublic: playlist.public !== false
+    }));
+  };
+
+  const fetchPlaylistTracksFromUserSpotify = async (discordUserId, playlistId, maxTracks = 500) => {
+    const safePlaylistId = String(playlistId || '').trim();
+    if (!safePlaylistId) throw new Error('SPOTIFY_PLAYLIST_ID_MISSING');
+    const hardCap = Math.max(1, Math.min(1000, Number(maxTracks || 500)));
+
+    const meta = await spotifyApiJsonForUser(
+      discordUserId,
+      `/playlists/${encodeURIComponent(safePlaylistId)}?fields=name,images,tracks(total),owner(display_name,id)`
+    );
+
+    const cover = meta?.images?.[0]?.url || null;
+    const tracks = [];
+    let offset = 0;
+
+    while (tracks.length < hardCap) {
+      const limit = Math.min(100, hardCap - tracks.length);
+      const page = await spotifyApiJsonForUser(
+        discordUserId,
+        `/playlists/${encodeURIComponent(safePlaylistId)}/tracks?limit=${limit}&offset=${offset}`
+      );
+      const items = Array.isArray(page?.items) ? page.items : [];
+      if (!items.length) break;
+
+      for (const entry of items) {
+        const track = entry?.track;
+        if (!track || !track.name || !track.external_urls?.spotify) continue;
+        tracks.push(client.musicManager.spotify.mapTrack(track, cover));
+      }
+
+      offset += items.length;
+      if (!page?.next || items.length < limit) break;
+    }
+
+    return {
+      name: meta?.name || 'Spotify Playlist',
+      tracks,
+      requestedCount: Number(meta?.tracks?.total || tracks.length)
+    };
+  };
+
+  const fetchLikedTracksFromUserSpotify = async (discordUserId, maxTracks = 400) => {
+    const hardCap = Math.max(1, Math.min(1000, Number(maxTracks || 400)));
+    const tracks = [];
+    let offset = 0;
+
+    while (tracks.length < hardCap) {
+      const limit = Math.min(50, hardCap - tracks.length);
+      const page = await spotifyApiJsonForUser(discordUserId, `/me/tracks?limit=${limit}&offset=${offset}`);
+      const items = Array.isArray(page?.items) ? page.items : [];
+      if (!items.length) break;
+
+      for (const entry of items) {
+        const track = entry?.track;
+        if (!track || !track.name || !track.external_urls?.spotify) continue;
+        tracks.push(client.musicManager.spotify.mapTrack(track));
+      }
+
+      offset += items.length;
+      if (!page?.next || items.length < limit) break;
+    }
+
+    return tracks;
+  };
+
+  const buildSpotifySectionPayload = async (req) => {
+    const discordUserId = req.session?.user?.id;
+    const locale = getRequestLocale(req);
+    const allowed = isSpotifyFeatureEnabledForUser(discordUserId);
+    if (!allowed) {
+      return {
+        enabled: false,
+        allowed: false,
+        linked: false,
+        profile: null,
+        playlists: [],
+        likedCount: 0,
+        message: t(locale, 'dashboard.spotifyNotAllowed')
+      };
+    }
+
+    const linkedUser = spotifyUserStore.get(discordUserId);
+    if (!linkedUser?.accessToken) {
+      return {
+        enabled: true,
+        allowed: true,
+        linked: false,
+        profile: null,
+        playlists: [],
+        likedCount: 0,
+        message: t(locale, 'dashboard.spotifyNotConnected')
+      };
+    }
+
+    const profile = await spotifyApiJsonForUser(discordUserId, '/me');
+    const playlists = await fetchUserPlaylists(discordUserId, 30);
+    const likedSummary = await spotifyApiJsonForUser(discordUserId, '/me/tracks?limit=1&offset=0');
+
+    await storeSpotifyUserProfile(discordUserId, profile);
+
+    return {
+      enabled: true,
+      allowed: true,
+      linked: true,
+      profile: mapSpotifyProfile(profile),
+      playlists,
+      likedCount: Number(likedSummary?.total || 0),
+      message: t(locale, 'dashboard.connectedAndAuthorized')
+    };
   };
 
   const fetchDiscordToken = async (code, redirectUri = config.discord.redirectUri) => {
@@ -468,6 +771,78 @@ const createDashboardServer = (client) => {
     }
   });
 
+  app.get('/auth/spotify/login', requireAuth, (req, res) => {
+    if (!spotifyOauthReady) {
+      res.status(500).send(tr(req, 'dashboard.spotifyFeatureDisabled'));
+      return;
+    }
+
+    if (!isSpotifyFeatureEnabledForUser(req.session.user.id)) {
+      res.status(403).send(tr(req, 'dashboard.spotifyNotAllowed'));
+      return;
+    }
+
+    const state = crypto.randomBytes(24).toString('hex');
+    req.session.spotifyOauthState = state;
+    req.session.spotifyOauthUserId = req.session.user.id;
+
+    const params = new URLSearchParams({
+      response_type: 'code',
+      client_id: config.spotify.clientId,
+      scope: spotifyScopes.join(' '),
+      redirect_uri: config.spotify.redirectUri,
+      state,
+      show_dialog: 'false'
+    });
+
+    res.redirect(`https://accounts.spotify.com/authorize?${params.toString()}`);
+  });
+
+  app.get('/auth/spotify/callback', async (req, res) => {
+    const locale = getRequestLocale(req);
+    try {
+      if (!req.session.user) throw new Error(t(locale, 'dashboard.loginRequired'));
+      if (!spotifyOauthReady) throw new Error(t(locale, 'dashboard.spotifyFeatureDisabled'));
+      if (!isSpotifyFeatureEnabledForUser(req.session.user.id)) throw new Error(t(locale, 'dashboard.spotifyNotAllowed'));
+
+      const oauthCode = String(req.query.code || '');
+      const oauthState = String(req.query.state || '');
+      if (!oauthCode || !oauthState) throw new Error(t(locale, 'dashboard.spotifyOauthIncomplete'));
+
+      if (
+        req.session.spotifyOauthState !== oauthState ||
+        String(req.session.spotifyOauthUserId || '') !== String(req.session.user.id || '')
+      ) {
+        throw new Error(t(locale, 'dashboard.spotifyOauthStateInvalid'));
+      }
+
+      const tokenData = await spotifyTokenRequest({
+        grant_type: 'authorization_code',
+        code: oauthCode,
+        redirect_uri: config.spotify.redirectUri
+      });
+
+      const profile = await fetchSpotifyProfileByToken(tokenData.access_token);
+      await storeSpotifyUserAuth(req.session.user.id, tokenData, profile);
+
+      delete req.session.spotifyOauthState;
+      delete req.session.spotifyOauthUserId;
+      res.redirect('/');
+    } catch (error) {
+      logger.error('Spotify OAuth callback failed', error);
+      res.status(500).send(t(locale, 'dashboard.spotifyOauthFailed', { error: formatApiError(req, error) }));
+    }
+  });
+
+  app.post('/auth/spotify/logout', requireAuth, requireSpotifyAllowed, async (req, res) => {
+    try {
+      await spotifyUserStore.delete(req.session.user.id);
+      res.json({ ok: true });
+    } catch (error) {
+      res.status(500).json({ error: formatApiError(req, error, 'dashboard.spotifyLibraryFailed') });
+    }
+  });
+
   app.post('/auth/logout', (req, res) => {
     req.session.destroy(() => {
       res.json({ ok: true });
@@ -476,7 +851,7 @@ const createDashboardServer = (client) => {
 
   app.get('/api/me', (req, res) => {
     if (!req.session.user) {
-      res.json({ authenticated: false, user: null, locale: 'en' });
+      res.json({ authenticated: false, user: null, locale: 'en', spotifyAllowed: false });
       return;
     }
 
@@ -487,7 +862,96 @@ const createDashboardServer = (client) => {
     }
 
     const locale = getRequestLocale(req);
-    res.json({ authenticated: true, user: req.session.user, locale });
+    res.json({
+      authenticated: true,
+      user: req.session.user,
+      locale,
+      spotifyAllowed: isSpotifyFeatureEnabledForUser(req.session.user.id)
+    });
+  });
+
+  app.get('/api/spotify/library', requireAuth, async (req, res) => {
+    try {
+      if (!spotifyOauthReady) {
+        res.json({
+          enabled: false,
+          allowed: false,
+          linked: false,
+          profile: null,
+          playlists: [],
+          likedCount: 0,
+          message: tr(req, 'dashboard.spotifyFeatureDisabled')
+        });
+        return;
+      }
+
+      const payload = await buildSpotifySectionPayload(req);
+      res.json(payload);
+    } catch (error) {
+      res.status(500).json({ error: formatApiError(req, error, 'dashboard.spotifyLibraryFailed') });
+    }
+  });
+
+  app.post('/api/spotify/queue/playlist', requireAuth, requireSpotifyAllowed, async (req, res) => {
+    try {
+      const playlistId = String(req.body?.playlistId || '').trim();
+      if (!playlistId) {
+        res.status(400).json({ error: tr(req, 'dashboard.spotifyPlaylistIdMissing') });
+        return;
+      }
+
+      const { session, queue } = await requireControllableSession(req);
+      const locale = getRequestLocale(req);
+      const userLocaleRaw = req.session?.user?.discordLocale || req.session?.user?.locale || req.session?.locale || locale;
+      client.musicManager.setQueueLocale(queue, locale);
+
+      const playlistData = await fetchPlaylistTracksFromUserSpotify(req.session.user.id, playlistId, 500);
+      const result = await client.musicManager.enqueueSpotifyTrackList({
+        guildId: session.guildId,
+        voiceChannelId: queue.voiceChannelId,
+        textChannelId: queue.textChannelId,
+        requestedBy: req.session.user.id,
+        spotifyTracks: playlistData.tracks,
+        locale,
+        userLocale: userLocaleRaw,
+        sourceKind: 'playlist',
+        playlistName: playlistData.name
+      });
+
+      const payload = await buildSessionPayload(req);
+      res.json({ ok: true, result, ...payload });
+    } catch (error) {
+      res.status(403).json({ error: formatApiError(req, error, 'dashboard.spotifyQueuePlaylistFailed') });
+    }
+  });
+
+  app.post('/api/spotify/queue/liked', requireAuth, requireSpotifyAllowed, async (req, res) => {
+    try {
+      const { session, queue } = await requireControllableSession(req);
+      const locale = getRequestLocale(req);
+      const userLocaleRaw = req.session?.user?.discordLocale || req.session?.user?.locale || req.session?.locale || locale;
+      client.musicManager.setQueueLocale(queue, locale);
+
+      const likedTracks = await fetchLikedTracksFromUserSpotify(req.session.user.id, 500);
+      if (!likedTracks.length) throw new Error(t(locale, 'dashboard.spotifyLikedEmpty'));
+
+      const result = await client.musicManager.enqueueSpotifyTrackList({
+        guildId: session.guildId,
+        voiceChannelId: queue.voiceChannelId,
+        textChannelId: queue.textChannelId,
+        requestedBy: req.session.user.id,
+        spotifyTracks: likedTracks,
+        locale,
+        userLocale: userLocaleRaw,
+        sourceKind: 'playlist',
+        playlistName: t(locale, 'dashboard.spotifyLikedSongsName')
+      });
+
+      const payload = await buildSessionPayload(req);
+      res.json({ ok: true, result, ...payload });
+    } catch (error) {
+      res.status(403).json({ error: formatApiError(req, error, 'dashboard.spotifyQueueLikedFailed') });
+    }
   });
 
   app.get('/api/session', requireAuth, async (req, res) => {
