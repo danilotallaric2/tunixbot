@@ -383,6 +383,8 @@ svg {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .spotify-user-head {
@@ -474,15 +476,17 @@ svg {
 }
 
 .spotify-library-list {
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   display: grid;
   gap: 8px;
   padding-right: 2px;
+  min-width: 0;
 }
 
 .spotify-lib-item {
   display: grid;
-  grid-template-columns: 54px 1fr;
+  grid-template-columns: 54px minmax(0, 1fr);
   gap: 10px;
   align-items: center;
   border-radius: 10px;
@@ -507,6 +511,10 @@ svg {
   border-radius: 6px;
   object-fit: cover;
   background: #1f3457;
+}
+
+.spotify-lib-item > div {
+  min-width: 0;
 }
 
 .spotify-lib-title {
@@ -539,10 +547,47 @@ svg {
 }
 
 .spotify-liked-bulk {
-  border: 1px dashed rgba(113, 176, 255, 0.45);
+  border: 1px solid rgba(108, 188, 255, 0.34);
+  border-radius: 12px;
+  padding: 10px;
+  background: linear-gradient(135deg, rgba(17, 30, 54, 0.92), rgba(10, 20, 39, 0.92));
+}
+
+.spotify-liked-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.spotify-liked-icon {
+  width: 36px;
+  height: 36px;
   border-radius: 10px;
-  padding: 12px;
-  background: rgba(13, 22, 41, 0.9);
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #5d8dff, #39d0ff);
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.24);
+}
+
+.spotify-liked-icon svg {
+  width: 17px;
+  height: 17px;
+  fill: currentColor;
+}
+
+.spotify-liked-main {
+  min-width: 0;
+}
+
+.spotify-liked-open-btn {
+  height: 30px;
+  min-height: 30px;
+  padding: 0 12px;
+  font-size: 0.74rem;
+  font-weight: 800;
+  white-space: nowrap;
 }
 
 .spotify-playlist-card {
@@ -605,6 +650,12 @@ svg {
   margin-top: 10px;
   display: flex;
   justify-content: center;
+}
+
+.lyrics-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .queue-author {

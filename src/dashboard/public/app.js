@@ -55,6 +55,7 @@ const spotifyPlaylistTitle = document.getElementById('spotifyPlaylistTitle');
 const spotifyPlaylistMeta = document.getElementById('spotifyPlaylistMeta');
 const spotifyPlaylistTracks = document.getElementById('spotifyPlaylistTracks');
 const spotifyPlaylistCloseBtn = document.getElementById('spotifyPlaylistCloseBtn');
+const spotifyPlaylistQueueAllBtn = document.getElementById('spotifyPlaylistQueueAllBtn');
 const spotifyPlaylistLoadMoreBtn = document.getElementById('spotifyPlaylistLoadMoreBtn');
 
 const npThumb = document.getElementById('npThumb');
@@ -211,6 +212,8 @@ const I18N = {
       spotifyTracksCount: '{count} tracks',
       spotifyPlaylistsEmpty: 'No playlists found on this account.',
       spotifyPlaylistQueue: 'Queue Playlist',
+      spotifyPlaylistQueueAll: 'Add All to Queue',
+      spotifyLikedQueueAll: 'Queue All Liked Songs',
       spotifyLinkedAs: 'Connected as {name}',
       spotifyOpenPlaylist: 'Open',
       spotifyQueueTrack: 'Queue Track',
@@ -341,6 +344,8 @@ const I18N = {
       spotifyTracksCount: '{count} brani',
       spotifyPlaylistsEmpty: 'Nessuna playlist trovata su questo account.',
       spotifyPlaylistQueue: 'Metti Playlist in Coda',
+      spotifyPlaylistQueueAll: 'Aggiungi Tutto in Coda',
+      spotifyLikedQueueAll: 'Aggiungi Tutti i Preferiti in Coda',
       spotifyLinkedAs: 'Collegato come {name}',
       spotifyOpenPlaylist: 'Apri',
       spotifyQueueTrack: 'Metti Brano in Coda',
@@ -487,6 +492,11 @@ const setText = (selector, text) => {
   if (el) el.textContent = text;
 };
 
+const getSpotifyQueueAllLabel = () => {
+  const isLiked = spotifySelectedPlaylist?.id === 'liked';
+  return isLiked ? tr('ui.spotifyLikedQueueAll') : tr('ui.spotifyPlaylistQueueAll');
+};
+
 const setBootLoadingVisible = (visible) => {
   if (!bootSplash) return;
   bootSplash.classList.toggle('hidden', !visible);
@@ -578,6 +588,7 @@ const applyLocale = (locale) => {
   if (spotifyQueueLikedBtn) spotifyQueueLikedBtn.textContent = tr('ui.spotifyOpenLiked');
   if (spotifyPlaylistLoadMoreBtn) spotifyPlaylistLoadMoreBtn.textContent = tr('ui.spotifyPlaylistLoadMore');
   if (spotifyPlaylistCloseBtn) spotifyPlaylistCloseBtn.textContent = tr('ui.close');
+  if (spotifyPlaylistQueueAllBtn) spotifyPlaylistQueueAllBtn.textContent = getSpotifyQueueAllLabel();
   if (spotifyPlaylistTitle && !spotifySelectedPlaylist) spotifyPlaylistTitle.textContent = tr('ui.spotifyPlaylistTitle');
 
   for (const btn of sourceOptionButtons) {
@@ -1277,9 +1288,6 @@ const renderSpotifyLibrary = (payload) => {
       <div>
         <div class="spotify-lib-title">${playlist.name || '-'}</div>
         <div class="spotify-lib-sub">${playlist.owner || '-'} • ${tr('ui.spotifyTracksCount', { count: Number(playlist.tracksTotal || 0) })}</div>
-        <div class="spotify-lib-actions">
-          <button class="queue-action-btn" data-spotify-playlist-id="${playlist.id}">${tr('ui.spotifyPlaylistQueue')}</button>
-        </div>
       </div>
     `;
     spotifyLibraryList.appendChild(item);
@@ -1360,12 +1368,14 @@ const openSpotifyPlaylist = async (playlist) => {
     name: String(playlist?.name || ''),
     owner: String(playlist?.owner || '-'),
     total: Number(playlist?.tracksTotal || 0),
-    image: String(playlist?.image || '')
+    image: String(playlist?.image || ''),
+    kind: 'playlist'
   };
 
   setSpotifyPlaylistOpen(true);
   spotifyPlaylistTitle.textContent = spotifySelectedPlaylist.name || tr('ui.spotifyPlaylistTitle');
   spotifyPlaylistMeta.textContent = `${spotifySelectedPlaylist.owner} • ${tr('ui.spotifyTracksCount', { count: spotifySelectedPlaylist.total })}`;
+  if (spotifyPlaylistQueueAllBtn) spotifyPlaylistQueueAllBtn.textContent = getSpotifyQueueAllLabel();
   await loadSpotifyPlaylistTracks(playlistId, { offset: 0, append: false });
 };
 
@@ -1383,6 +1393,7 @@ const openSpotifyLikedSongs = async () => {
   setSpotifyPlaylistOpen(true);
   spotifyPlaylistTitle.textContent = spotifySelectedPlaylist.name;
   spotifyPlaylistMeta.textContent = `Spotify • ${tr('ui.spotifyTracksCount', { count: likedCount })}`;
+  if (spotifyPlaylistQueueAllBtn) spotifyPlaylistQueueAllBtn.textContent = getSpotifyQueueAllLabel();
   await loadSpotifyPlaylistTracks('liked', { offset: 0, append: false });
 };
 
@@ -1972,15 +1983,6 @@ spotifyLibraryList?.addEventListener('click', (event) => {
   const target = event.target;
   if (!(target instanceof Element)) return;
   const item = target.closest('.spotify-lib-item');
-
-  const playlistBtn = target.closest('[data-spotify-playlist-id]');
-  if (playlistBtn instanceof HTMLElement) {
-    const playlistId = String(playlistBtn.dataset.spotifyPlaylistId || '').trim();
-    if (!playlistId) return;
-    queueSpotifyPlaylist(playlistId);
-    return;
-  }
-
   if (!(item instanceof HTMLElement)) return;
   const playlist = {
     id: String(item.dataset.spotifyPlaylistId || '').trim(),
@@ -1990,6 +1992,16 @@ spotifyLibraryList?.addEventListener('click', (event) => {
     image: item.dataset.spotifyPlaylistImage || ''
   };
   if (playlist.id) openSpotifyPlaylist(playlist);
+});
+
+spotifyPlaylistQueueAllBtn?.addEventListener('click', async () => {
+  const selectedId = String(spotifySelectedPlaylist?.id || '').trim();
+  if (!selectedId) return;
+  if (selectedId === 'liked') {
+    await queueSpotifyLikedSongs();
+    return;
+  }
+  await queueSpotifyPlaylist(selectedId);
 });
 
 spotifyPlaylistTracks?.addEventListener('click', (event) => {

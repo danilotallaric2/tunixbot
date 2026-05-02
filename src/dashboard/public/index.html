@@ -180,7 +180,10 @@
               <div class="lyrics-title" id="spotifyPlaylistTitle">Playlist</div>
               <div id="spotifyPlaylistMeta" class="lyrics-track-label">-</div>
             </div>
-            <button id="spotifyPlaylistCloseBtn" class="ctl">Chiudi</button>
+            <div class="lyrics-head-actions">
+              <button id="spotifyPlaylistQueueAllBtn" class="ctl main">Aggiungi Tutto</button>
+              <button id="spotifyPlaylistCloseBtn" class="ctl">Chiudi</button>
+            </div>
           </div>
 
           <div id="spotifyPlaylistTracks" class="spotify-playlist-tracks"></div>
@@ -249,10 +252,15 @@
             </div>
 
             <div id="spotifyLikedBulk" class="spotify-liked-bulk hidden">
-              <div id="spotifyLikedTitle" class="spotify-lib-title">Liked Songs</div>
-              <div id="spotifyLikedCount" class="spotify-lib-sub">0 tracks</div>
-              <div class="spotify-lib-actions">
-                <button id="spotifyQueueLikedBtn" type="button" class="btn primary">Open Liked Songs</button>
+              <div class="spotify-liked-head">
+                <div class="spotify-liked-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><path d="M12 21.2 10.5 20C5.1 15.3 2 12.6 2 9.3 2 6.7 4.1 4.6 6.7 4.6c1.5 0 2.9.7 3.8 1.9.9-1.2 2.3-1.9 3.8-1.9 2.6 0 4.7 2.1 4.7 4.7 0 3.3-3.1 6-8.5 10.7L12 21.2z"/></svg>
+                </div>
+                <div class="spotify-liked-main">
+                  <div id="spotifyLikedTitle" class="spotify-lib-title">Liked Songs</div>
+                  <div id="spotifyLikedCount" class="spotify-lib-sub">0 tracks</div>
+                </div>
+                <button id="spotifyQueueLikedBtn" type="button" class="ctl spotify-liked-open-btn">Open</button>
               </div>
             </div>
 
