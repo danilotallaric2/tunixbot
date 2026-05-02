@@ -1,4 +1,5 @@
 const dotenv = require('dotenv');
+const path = require('path');
 
 dotenv.config();
 
@@ -37,7 +38,10 @@ const config = {
       }
     ],
     reconnectTries: parseIntOr(process.env.LAVALINK_RECONNECT_TRIES, 999999),
-    reconnectIntervalMs: Math.max(500, parseIntOr(process.env.LAVALINK_RECONNECT_INTERVAL_MS, 5000))
+    reconnectIntervalMs: Math.max(500, parseIntOr(process.env.LAVALINK_RECONNECT_INTERVAL_MS, 5000)),
+    resume: parseBool(process.env.LAVALINK_RESUME, true),
+    resumeTimeoutSec: Math.max(10, parseIntOr(process.env.LAVALINK_RESUME_TIMEOUT_SEC, 120)),
+    resumeByLibrary: parseBool(process.env.LAVALINK_RESUME_BY_LIBRARY, true)
   },
   spotify: {
     clientId: process.env.SPOTIFY_CLIENT_ID,
@@ -48,7 +52,16 @@ const config = {
     defaultVolume: parseIntOr(process.env.DEFAULT_VOLUME, 80),
     maxQueueSize: parseIntOr(process.env.MAX_QUEUE_SIZE, 500),
     autoDisconnectMs: parseIntOr(process.env.AUTO_DISCONNECT_MS, 120000),
-    autoPlayRelatedWhenQueueEnds: parseBool(process.env.AUTO_PLAY_RELATED_WHEN_QUEUE_ENDS, true)
+    autoPlayRelatedWhenQueueEnds: parseBool(process.env.AUTO_PLAY_RELATED_WHEN_QUEUE_ENDS, true),
+    sessionPersistence: {
+      enabled: parseBool(process.env.MUSIC_SESSION_PERSISTENCE_ENABLED, true),
+      filePath:
+        process.env.MUSIC_SESSION_PERSISTENCE_FILE?.trim() ||
+        path.join(__dirname, 'data', 'music-sessions.json'),
+      saveDebounceMs: Math.max(200, parseIntOr(process.env.MUSIC_SESSION_PERSISTENCE_DEBOUNCE_MS, 450)),
+      restoreOnStart: parseBool(process.env.MUSIC_SESSION_RESTORE_ON_START, true),
+      maxAgeMs: Math.max(60000, parseIntOr(process.env.MUSIC_SESSION_RESTORE_MAX_AGE_MS, 1000 * 60 * 60 * 8))
+    }
   },
   dashboard: {
     enabled: parseBool(process.env.DASHBOARD_ENABLED, true),

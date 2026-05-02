@@ -120,6 +120,22 @@ I comandi vengono registrati automaticamente all'avvio.
 ## Note Lavalink
 
 TunixBot usa Shoukaku come client Lavalink. Devi avere un nodo Lavalink funzionante prima di avviare il bot.
+Per aggiornamenti "live" senza rifare `/join`, il bot abilita il resume Lavalink + restore sessioni da JSON.
+
+Variabili utili:
+
+- `LAVALINK_RESUME=true`
+- `LAVALINK_RESUME_TIMEOUT_SEC=120`
+- `LAVALINK_RESUME_BY_LIBRARY=true`
+- `MUSIC_SESSION_PERSISTENCE_ENABLED=true`
+- `MUSIC_SESSION_PERSISTENCE_FILE=src/data/music-sessions.json`
+- `MUSIC_SESSION_RESTORE_ON_START=true`
+
+Per deploy in produzione usa restart graceful (esempio PM2):
+
+```bash
+pm2 reload tunixbot
+```
 
 ## Stabilita e produzione
 

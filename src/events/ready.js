@@ -43,6 +43,7 @@ module.exports = {
     logger.info(`Logged in as ${client.user.tag}`);
     await registerCommands(client);
     await client.musicManager.init();
+    await client.musicManager.restoreSessionsFromDisk();
     if (config.dashboard.enabled) {
       client.dashboardServer = createDashboardServer(client);
     }

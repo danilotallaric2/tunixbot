@@ -42,4 +42,39 @@ for (const file of eventFiles) {
 process.on('unhandledRejection', (error) => logger.error('Unhandled Promise Rejection', error));
 process.on('uncaughtException', (error) => logger.error('Uncaught Exception', error));
 
+let isShuttingDown = false;
+const gracefulShutdown = async (signal) => {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+
+  logger.info(`Graceful shutdown requested (${signal})`);
+  try {
+    if (client.musicManager?.shutdown) {
+      await client.musicManager.shutdown();
+    }
+  } catch (error) {
+    logger.warn(`MusicManager shutdown failed: ${error?.message || error}`);
+  }
+
+  try {
+    client.destroy();
+  } catch {
+    // noop
+  }
+
+  process.exit(0);
+};
+
+process.on('SIGINT', () => {
+  gracefulShutdown('SIGINT').catch(() => process.exit(0));
+});
+process.on('SIGTERM', () => {
+  gracefulShutdown('SIGTERM').catch(() => process.exit(0));
+});
+process.on('message', (msg) => {
+  if (msg === 'shutdown') {
+    gracefulShutdown('pm2:shutdown').catch(() => process.exit(0));
+  }
+});
+
 client.login(config.discord.token);

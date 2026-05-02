@@ -1,5 +1,7 @@
 const { Shoukaku, Connectors } = require('shoukaku');
 const { inspect } = require('util');
+const fs = require('fs');
+const path = require('path');
 const config = require('../config');
 const logger = require('../utils/logger');
 const GuildQueue = require('./GuildQueue');
@@ -28,6 +30,12 @@ class MusicManager {
     this.client = client;
     this.queues = new Map();
     this.spotify = new SpotifyService(config.spotify);
+    this.sessionPersistence = config.music.sessionPersistence || {};
+    this.sessionStateSaveTimer = null;
+    this.sessionStateSavePending = false;
+    this.sessionStateSaveInFlight = false;
+    this.sessionStateLastSerialized = null;
+    this.restoreStarted = false;
     this.lavalinkCloseStats = {
       lastLogAt: 0,
       suppressedCount: 0,
@@ -40,6 +48,9 @@ class MusicManager {
       new Connectors.DiscordJS(client),
       config.lavalink.nodes,
       {
+        resume: Boolean(config.lavalink.resume),
+        resumeTimeout: Math.max(10, Number(config.lavalink.resumeTimeoutSec || 120)),
+        resumeByLibrary: Boolean(config.lavalink.resumeByLibrary),
         reconnectTries: config.lavalink.reconnectTries,
         reconnectInterval: Math.max(1, Math.round(config.lavalink.reconnectIntervalMs / 1000)),
         nodeResolver: (nodes) => {
@@ -242,6 +253,346 @@ class MusicManager {
     queue.startedAt = Date.now();
   }
 
+  isSessionPersistenceEnabled() {
+    return Boolean(this.sessionPersistence?.enabled && this.sessionPersistence?.filePath);
+  }
+
+  getSessionPersistenceFilePath() {
+    return String(this.sessionPersistence?.filePath || '').trim();
+  }
+
+  serializeTrackForState(track) {
+    if (!track || typeof track !== 'object') return null;
+    if (!track.encoded || typeof track.encoded !== 'string') return null;
+
+    return {
+      encoded: track.encoded,
+      title: String(track.title || 'Unknown Title'),
+      author: String(track.author || 'Unknown Author'),
+      duration: Math.max(0, Number(track.duration || 0)),
+      url: track.url || null,
+      thumbnail: track.thumbnail || null,
+      requestedBy: track.requestedBy || null,
+      recoveryAttempts: Math.max(0, Number(track.recoveryAttempts || 0)),
+      triedFallbackSignatures: Array.isArray(track.triedFallbackSignatures) ? track.triedFallbackSignatures : []
+    };
+  }
+
+  deserializeTrackFromState(trackData) {
+    if (!trackData || typeof trackData !== 'object') return null;
+    const encoded = typeof trackData.encoded === 'string' ? trackData.encoded : null;
+    if (!encoded) return null;
+
+    return {
+      encoded,
+      title: String(trackData.title || 'Unknown Title'),
+      author: String(trackData.author || 'Unknown Author'),
+      duration: Math.max(0, Number(trackData.duration || 0)),
+      url: trackData.url || null,
+      thumbnail: trackData.thumbnail || null,
+      requestedBy: trackData.requestedBy || 'system',
+      recoveryAttempts: Math.max(0, Number(trackData.recoveryAttempts || 0)),
+      triedFallbackSignatures: Array.isArray(trackData.triedFallbackSignatures) ? trackData.triedFallbackSignatures : []
+    };
+  }
+
+  buildQueueSessionState(queue) {
+    if (!queue) return null;
+    const current = this.serializeTrackForState(queue.current);
+    const tracks = Array.isArray(queue.tracks)
+      ? queue.tracks.map((track) => this.serializeTrackForState(track)).filter(Boolean)
+      : [];
+    const positionMs = current ? Math.max(0, Math.floor(this.getPlayerPosition(queue))) : 0;
+
+    return {
+      guildId: queue.guildId,
+      voiceChannelId: queue.voiceChannelId,
+      textChannelId: queue.textChannelId,
+      joinedByUserId: queue.joinedByUserId || null,
+      joinedAt: Number(queue.joinedAt || 0),
+      locale: this.resolveQueueLocale(queue),
+      spotifyMarket: this.resolveSpotifyMarket(queue.spotifyMarket || queue.locale || 'it'),
+      volume: Math.max(0, Math.min(200, Number(queue.volume || config.music.defaultVolume))),
+      loopMode: ['off', 'song', 'queue'].includes(queue.loopMode) ? queue.loopMode : 'off',
+      filter: queue.filter || 'clear',
+      paused: Boolean(queue.paused),
+      positionMs,
+      current,
+      tracks,
+      recentTrackKeys: Array.isArray(queue.recentTrackKeys) ? queue.recentTrackKeys.slice(-40) : [],
+      savedAt: Date.now()
+    };
+  }
+
+  buildSessionStatePayload() {
+    const queues = [...this.queues.values()]
+      .map((queue) => this.buildQueueSessionState(queue))
+      .filter((entry) => entry && (entry.current || (Array.isArray(entry.tracks) && entry.tracks.length > 0)));
+
+    return {
+      version: 1,
+      savedAt: Date.now(),
+      queues
+    };
+  }
+
+  scheduleSessionStateSave(delayMs = null) {
+    if (!this.isSessionPersistenceEnabled()) return;
+    this.sessionStateSavePending = true;
+
+    if (this.sessionStateSaveTimer) {
+      clearTimeout(this.sessionStateSaveTimer);
+      this.sessionStateSaveTimer = null;
+    }
+
+    const waitMs =
+      delayMs === null
+        ? Math.max(200, Number(this.sessionPersistence?.saveDebounceMs || 450))
+        : Math.max(0, Number(delayMs || 0));
+
+    this.sessionStateSaveTimer = setTimeout(() => {
+      this.persistSessionState().catch((error) => {
+        logger.warn(`Session persistence save failed: ${error?.message || error}`);
+      });
+    }, waitMs);
+    this.sessionStateSaveTimer.unref?.();
+  }
+
+  async persistSessionState(force = false) {
+    if (!this.isSessionPersistenceEnabled()) return false;
+
+    if (this.sessionStateSaveTimer) {
+      clearTimeout(this.sessionStateSaveTimer);
+      this.sessionStateSaveTimer = null;
+    }
+
+    if (this.sessionStateSaveInFlight) {
+      this.sessionStateSavePending = true;
+      return false;
+    }
+
+    this.sessionStateSaveInFlight = true;
+    try {
+      do {
+        this.sessionStateSavePending = false;
+        const payload = this.buildSessionStatePayload();
+        const serialized = JSON.stringify(payload, null, 2);
+
+        if (!force && serialized === this.sessionStateLastSerialized) continue;
+
+        const filePath = this.getSessionPersistenceFilePath();
+        const dir = path.dirname(filePath);
+        const tmpPath = `${filePath}.tmp`;
+
+        await fs.promises.mkdir(dir, { recursive: true });
+        await fs.promises.writeFile(tmpPath, serialized, 'utf8');
+        await fs.promises.rename(tmpPath, filePath);
+
+        this.sessionStateLastSerialized = serialized;
+      } while (this.sessionStateSavePending);
+    } finally {
+      this.sessionStateSaveInFlight = false;
+    }
+
+    return true;
+  }
+
+  async loadSessionStatePayload() {
+    if (!this.isSessionPersistenceEnabled()) return null;
+    const filePath = this.getSessionPersistenceFilePath();
+
+    try {
+      const raw = await fs.promises.readFile(filePath, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return null;
+      if (!Array.isArray(parsed.queues)) return null;
+      return parsed;
+    } catch (error) {
+      if (error?.code === 'ENOENT') return null;
+      logger.warn(`Session persistence read failed: ${error?.message || error}`);
+      return null;
+    }
+  }
+
+  async waitForLavalinkReady(timeoutMs = 15000) {
+    if (this.getIdealNodeSafe()) return true;
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      await this.sleep(350);
+      if (this.getIdealNodeSafe()) return true;
+    }
+    return false;
+  }
+
+  isQueueStateTooOld(savedAt) {
+    const maxAge = Math.max(60000, Number(this.sessionPersistence?.maxAgeMs || 1000 * 60 * 60 * 8));
+    const stamp = Number(savedAt || 0);
+    if (!stamp) return false;
+    return Date.now() - stamp > maxAge;
+  }
+
+  async resolveValidRestoreTextChannel(guild, textChannelId) {
+    const candidate =
+      (textChannelId && (guild.channels.cache.get(textChannelId) || (await guild.channels.fetch(textChannelId).catch(() => null)))) ||
+      null;
+    if (candidate && candidate.isTextBased()) return candidate.id;
+
+    const fallback = guild.channels.cache.find((ch) => ch?.isTextBased?.() && ch?.viewable);
+    if (fallback) return fallback.id;
+
+    if (guild.systemChannelId) {
+      const system = guild.channels.cache.get(guild.systemChannelId) || (await guild.channels.fetch(guild.systemChannelId).catch(() => null));
+      if (system && system.isTextBased()) return system.id;
+    }
+
+    return null;
+  }
+
+  async restoreSingleQueueFromState(queueState) {
+    const guildId = String(queueState?.guildId || '').trim();
+    const voiceChannelId = String(queueState?.voiceChannelId || '').trim();
+    if (!guildId || !voiceChannelId) return { ok: false, reason: 'missing_ids' };
+
+    if (this.getQueue(guildId)) return { ok: true, reason: 'already_restored' };
+
+    const guild = this.client.guilds.cache.get(guildId) || (await this.client.guilds.fetch(guildId).catch(() => null));
+    if (!guild) return { ok: false, reason: 'guild_unavailable' };
+
+    const me = guild.members.me || (await guild.members.fetchMe().catch(() => null));
+    if (!me) return { ok: false, reason: 'bot_member_unavailable' };
+
+    const voiceChannel =
+      guild.channels.cache.get(voiceChannelId) || (await guild.channels.fetch(voiceChannelId).catch(() => null));
+    if (!voiceChannel || !voiceChannel.isVoiceBased()) return { ok: false, reason: 'voice_missing' };
+
+    const perms = voiceChannel.permissionsFor(me);
+    if (!perms?.has(['ViewChannel', 'Connect', 'Speak'])) return { ok: false, reason: 'missing_permissions' };
+
+    const textChannelId = await this.resolveValidRestoreTextChannel(guild, queueState?.textChannelId || null);
+    if (!textChannelId) return { ok: false, reason: 'text_missing' };
+
+    let queue;
+    try {
+      queue = await this.createQueueByIds({
+        guildId,
+        voiceChannelId: voiceChannel.id,
+        textChannelId,
+        locale: normalizeLocale(queueState?.locale || 'en'),
+        spotifyMarket: this.resolveSpotifyMarket(queueState?.spotifyMarket || queueState?.locale || 'it')
+      });
+    } catch (error) {
+      return { ok: false, reason: `join_failed:${error?.message || error}` };
+    }
+
+    queue.joinedByUserId = queueState?.joinedByUserId || null;
+    queue.joinedAt = Number(queueState?.joinedAt || 0);
+    queue.loopMode = ['off', 'song', 'queue'].includes(queueState?.loopMode) ? queueState.loopMode : 'off';
+    queue.filter = queueState?.filter || 'clear';
+    queue.volume = Math.max(0, Math.min(200, Number(queueState?.volume || config.music.defaultVolume)));
+    queue.recentTrackKeys = Array.isArray(queueState?.recentTrackKeys) ? queueState.recentTrackKeys.slice(-40) : [];
+    this.setQueueLocale(queue, queueState?.locale || 'en');
+    queue.spotifyMarket = this.resolveSpotifyMarket(queueState?.spotifyMarket || queueState?.locale || 'it');
+
+    await queue.player.setGlobalVolume(queue.volume).catch(() => null);
+    if (queue.filter && queue.filter !== 'clear' && FILTER_PRESETS[queue.filter]) {
+      await queue.player.setFilters(FILTER_PRESETS[queue.filter]).catch(() => null);
+    }
+
+    const restoredCurrent = this.deserializeTrackFromState(queueState?.current);
+    const restoredTracks = Array.isArray(queueState?.tracks)
+      ? queueState.tracks.map((track) => this.deserializeTrackFromState(track)).filter(Boolean)
+      : [];
+
+    queue.tracks = restoredTracks;
+
+    if (!restoredCurrent) {
+      if (queue.tracks.length > 0) {
+        await this.playNext(queue).catch(() => null);
+      }
+      return { ok: true, reason: 'restored_queue_only', guildId };
+    }
+
+    queue.current = restoredCurrent;
+    queue.currentSessionId += 1;
+    queue.currentStarted = false;
+    queue.clearDisconnectTimer();
+
+    const targetPosition = Math.max(0, Number(queueState?.positionMs || 0));
+    const maxDuration = Number(restoredCurrent.duration || 0);
+    const safePosition = maxDuration > 0 ? Math.min(targetPosition, maxDuration) : targetPosition;
+    const shouldStartPaused = Boolean(queueState?.paused);
+
+    try {
+      await queue.player.playTrack({
+        track: { encoded: restoredCurrent.encoded },
+        position: safePosition,
+        paused: shouldStartPaused
+      });
+      this.resetPositionClock(queue, safePosition);
+      queue.paused = shouldStartPaused;
+      this.armTrackStartTimeout(queue, queue.currentSessionId);
+    } catch (error) {
+      logger.warn(`Failed to restore playing track for guild ${guildId}: ${error?.message || error}`);
+      queue.current = null;
+      queue.currentStarted = false;
+      if (queue.tracks.length > 0) {
+        await this.playNext(queue).catch(() => null);
+      }
+    }
+
+    return { ok: true, reason: 'restored_playing', guildId };
+  }
+
+  async restoreSessionsFromDisk() {
+    if (!this.isSessionPersistenceEnabled()) return { restored: 0, skipped: 0, attempted: 0 };
+    if (!this.sessionPersistence?.restoreOnStart) return { restored: 0, skipped: 0, attempted: 0 };
+    if (this.restoreStarted) return { restored: 0, skipped: 0, attempted: 0 };
+    this.restoreStarted = true;
+
+    const nodeReady = await this.waitForLavalinkReady(20000);
+    if (!nodeReady) {
+      logger.warn('Skipping queue restore: Lavalink not ready in time.');
+      return { restored: 0, skipped: 0, attempted: 0 };
+    }
+
+    const payload = await this.loadSessionStatePayload();
+    const entries = Array.isArray(payload?.queues) ? payload.queues : [];
+    if (!entries.length) return { restored: 0, skipped: 0, attempted: 0 };
+
+    let restored = 0;
+    let skipped = 0;
+    let attempted = 0;
+
+    for (const queueState of entries) {
+      attempted += 1;
+      if (this.isQueueStateTooOld(queueState?.savedAt)) {
+        skipped += 1;
+        continue;
+      }
+
+      try {
+        const result = await this.restoreSingleQueueFromState(queueState);
+        if (result?.ok) restored += 1;
+        else skipped += 1;
+      } catch (error) {
+        skipped += 1;
+        logger.warn(`Queue restore failed: ${error?.message || error}`);
+      }
+    }
+
+    this.scheduleSessionStateSave(1500);
+    logger.info(`Queue restore completed: restored=${restored} skipped=${skipped} attempted=${attempted}`);
+    return { restored, skipped, attempted };
+  }
+
+  async shutdown() {
+    try {
+      await this.persistSessionState(true);
+    } catch (error) {
+      logger.warn(`Session persistence flush on shutdown failed: ${error?.message || error}`);
+    }
+  }
+
   isUrl(value) {
     return /^https?:\/\//i.test(value);
   }
@@ -348,6 +699,7 @@ class MusicManager {
     if (!job) return;
     Object.assign(job, patch);
     job.updatedAt = Date.now();
+    this.scheduleSessionStateSave();
   }
 
   finalizePlaylistLoadJob(queue, job, status, patch = {}) {
@@ -368,8 +720,10 @@ class MusicManager {
       if (!live || live.id !== job.id) return;
       if (live.active) return;
       queue.playlistLoadJob = null;
+      this.scheduleSessionStateSave();
     }, 5000);
     queue.playlistLoadCleanupTimer.unref?.();
+    this.scheduleSessionStateSave();
   }
 
   async cancelPlaylistLoad(guildId, options = {}) {
@@ -411,6 +765,7 @@ class MusicManager {
     if (!queue.current) {
       await this.playNext(queue);
     }
+    this.scheduleSessionStateSave();
 
     return true;
   }
@@ -1228,6 +1583,7 @@ class MusicManager {
 
     this.attachPlayerEvents(queue);
     this.queues.set(interaction.guildId, queue);
+    this.scheduleSessionStateSave();
 
     return queue;
   }
@@ -1261,6 +1617,7 @@ class MusicManager {
 
     this.attachPlayerEvents(queue);
     this.queues.set(guildId, queue);
+    this.scheduleSessionStateSave();
 
     return queue;
   }
@@ -1280,11 +1637,13 @@ class MusicManager {
       }
 
       await this.postNowPlaying(queue);
+      this.scheduleSessionStateSave();
     });
 
     queue.player.on('end', async (event) => {
       queue.clearTrackStartTimeout();
       await this.onTrackEnd(queue, event?.reason);
+      this.scheduleSessionStateSave();
     });
 
     queue.player.on('exception', async (event) => {
@@ -1296,6 +1655,7 @@ class MusicManager {
         embeds: [errorEmbed(t(locale, 'embeds.trackErrorTitle'), t(locale, 'embeds.trackErrorMessage'), locale)]
       });
       await this.onTrackEnd(queue, 'loadFailed');
+      this.scheduleSessionStateSave();
     });
 
     queue.player.on('stuck', async (event) => {
@@ -1306,6 +1666,7 @@ class MusicManager {
         embeds: [errorEmbed(t(locale, 'embeds.trackStuckTitle'), t(locale, 'embeds.trackStuckMessage'), locale)]
       });
       await this.onTrackEnd(queue, 'loadFailed');
+      this.scheduleSessionStateSave();
     });
   }
 
@@ -1379,6 +1740,7 @@ class MusicManager {
     queue.positionOffsetMs = 0;
     queue.startedAt = 0;
     await this.playNext(queue, { lastTrack: finishedTrack, endReason: reason });
+    this.scheduleSessionStateSave();
   }
 
   async playNext(queue, options = {}) {
@@ -1396,6 +1758,7 @@ class MusicManager {
 
       queue.current = null;
       await this.markNowPlayingAsEnded(queue, t(this.resolveQueueLocale(queue), 'embeds.nowPlayingEnded'));
+      this.scheduleSessionStateSave();
       return;
     }
 
@@ -1410,10 +1773,12 @@ class MusicManager {
         }
       });
       this.armTrackStartTimeout(queue, queue.currentSessionId);
+      this.scheduleSessionStateSave();
     } catch (error) {
       logger.error('Failed to play track.', error);
       queue.current = null;
       queue.currentStarted = false;
+      this.scheduleSessionStateSave();
       await this.playNext(queue);
     }
   }
@@ -1465,6 +1830,7 @@ class MusicManager {
       if (movedFromTracked) {
         queue.voiceChannelId = newState.channelId;
         queue.clearDisconnectTimer();
+        this.scheduleSessionStateSave();
       } else if (disconnectedFromTracked) {
         const locale = this.resolveQueueLocale(queue);
         await this.safeTextSend(queue.textChannelId, {
@@ -1525,6 +1891,7 @@ class MusicManager {
     }
 
     this.queues.delete(guildId);
+    this.scheduleSessionStateSave();
   }
 
   async safeTextSend(channelId, payload) {
@@ -1568,6 +1935,7 @@ class MusicManager {
     queue.textChannelId = textChannelId;
     this.setQueueLocale(queue, locale);
     queue.spotifyMarket = resolvedSpotifyMarket;
+    this.scheduleSessionStateSave();
 
     const node = queue.player.node || this.getIdealNodeSafe();
     if (!node) throw new Error('Nessun nodo Lavalink disponibile.');
@@ -1674,6 +2042,7 @@ class MusicManager {
     if (willStartImmediately) {
       await this.playNext(queue);
     }
+    this.scheduleSessionStateSave();
 
     return {
       addedCount: toAdd.length,
@@ -1753,6 +2122,7 @@ class MusicManager {
       existing.joinedAt = Date.now();
       this.setQueueLocale(existing, locale);
       existing.spotifyMarket = spotifyMarket;
+      this.scheduleSessionStateSave();
       return { created: false, voiceChannelId: existing.voiceChannelId };
     }
 
@@ -1761,6 +2131,7 @@ class MusicManager {
     queue.joinedAt = Date.now();
     this.setQueueLocale(queue, locale);
     queue.spotifyMarket = spotifyMarket;
+    this.scheduleSessionStateSave();
     return { created: true, voiceChannelId: queue.voiceChannelId };
   }
 
@@ -1770,6 +2141,7 @@ class MusicManager {
     queue.positionOffsetMs = this.getPlayerPosition(queue);
     await queue.player.setPaused(true);
     queue.paused = true;
+    this.scheduleSessionStateSave();
     return queue;
   }
 
@@ -1779,6 +2151,7 @@ class MusicManager {
     await queue.player.setPaused(false);
     queue.paused = false;
     queue.startedAt = Date.now();
+    this.scheduleSessionStateSave();
     return queue;
   }
 
@@ -1817,6 +2190,7 @@ class MusicManager {
       if (humanMembers.size === 0) this.scheduleDisconnectIfAlone(queue);
       else queue.clearDisconnectTimer();
     }
+    this.scheduleSessionStateSave();
   }
 
   async setVolume(guildId, value) {
@@ -1826,6 +2200,7 @@ class MusicManager {
     const volume = Math.max(0, Math.min(200, value));
     queue.volume = volume;
     await queue.player.setGlobalVolume(volume);
+    this.scheduleSessionStateSave();
     return queue;
   }
 
@@ -1838,6 +2213,7 @@ class MusicManager {
     }
 
     queue.loopMode = mode;
+    this.scheduleSessionStateSave();
     return queue;
   }
 
@@ -1849,6 +2225,7 @@ class MusicManager {
       const j = Math.floor(Math.random() * (i + 1));
       [queue.tracks[i], queue.tracks[j]] = [queue.tracks[j], queue.tracks[i]];
     }
+    this.scheduleSessionStateSave();
 
     return queue;
   }
@@ -1860,6 +2237,7 @@ class MusicManager {
     if (index < 1 || index > queue.tracks.length) throw new Error('Indice non valido.');
 
     const removed = queue.tracks.splice(index - 1, 1)[0];
+    this.scheduleSessionStateSave();
     return removed;
   }
 
@@ -1876,10 +2254,12 @@ class MusicManager {
 
     if (!queue.current) {
       await this.playNext(queue);
+      this.scheduleSessionStateSave();
       return picked;
     }
 
     await queue.player.stopTrack();
+    this.scheduleSessionStateSave();
     return picked;
   }
 
@@ -1889,6 +2269,7 @@ class MusicManager {
 
     await this.cancelPlaylistLoad(guildId, { silent: true });
     queue.tracks = [];
+    this.scheduleSessionStateSave();
     return queue;
   }
 
@@ -1903,6 +2284,7 @@ class MusicManager {
     await queue.player.seekTo(target);
     queue.positionOffsetMs = target;
     queue.startedAt = Date.now();
+    this.scheduleSessionStateSave();
     return queue;
   }
 
@@ -1920,6 +2302,7 @@ class MusicManager {
     }
 
     queue.filter = filterName;
+    this.scheduleSessionStateSave();
     return queue;
   }
 

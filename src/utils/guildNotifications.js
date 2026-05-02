@@ -19,7 +19,8 @@ const buildEmbed = (guild, mode) => {
     .addFields(
       { name: 'Server', value: formatGuildName(guild), inline: true },
       { name: 'Guild ID', value: guild?.id || 'N/D', inline: true },
-      { name: 'Membri', value: formatMemberCount(guild), inline: true }
+      { name: 'Membri', value: formatMemberCount(guild), inline: true },
+      { name: 'Proprietario', value: guild?.ownerId ? `<@${guild.ownerId}>` : 'N/D', inline: true }
     )
     .setFooter({ text: config.theme.footer })
     .setTimestamp();
