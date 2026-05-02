@@ -48,7 +48,6 @@ const spotifyRefreshBtn = document.getElementById('spotifyRefreshBtn');
 const spotifyLikedBulk = document.getElementById('spotifyLikedBulk');
 const spotifyLikedTitle = document.getElementById('spotifyLikedTitle');
 const spotifyLikedCount = document.getElementById('spotifyLikedCount');
-const spotifyQueueLikedBtn = document.getElementById('spotifyQueueLikedBtn');
 const spotifyLibraryList = document.getElementById('spotifyLibraryList');
 const spotifyPlaylistPanel = document.getElementById('spotifyPlaylistPanel');
 const spotifyPlaylistTitle = document.getElementById('spotifyPlaylistTitle');
@@ -585,7 +584,6 @@ const applyLocale = (locale) => {
     spotifyRefreshBtn.setAttribute('aria-label', tr('ui.spotifyRefreshAria'));
     spotifyRefreshBtn.title = tr('ui.spotifyRefresh');
   }
-  if (spotifyQueueLikedBtn) spotifyQueueLikedBtn.textContent = tr('ui.spotifyOpenLiked');
   if (spotifyPlaylistLoadMoreBtn) spotifyPlaylistLoadMoreBtn.textContent = tr('ui.spotifyPlaylistLoadMore');
   if (spotifyPlaylistCloseBtn) spotifyPlaylistCloseBtn.textContent = tr('ui.close');
   if (spotifyPlaylistQueueAllBtn) spotifyPlaylistQueueAllBtn.textContent = getSpotifyQueueAllLabel();
@@ -1975,7 +1973,7 @@ spotifyDisconnectBtn?.addEventListener('click', async () => {
   }
 });
 
-spotifyQueueLikedBtn?.addEventListener('click', () => {
+spotifyLikedBulk?.addEventListener('click', () => {
   openSpotifyLikedSongs();
 });
 

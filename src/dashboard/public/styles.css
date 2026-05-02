@@ -551,6 +551,13 @@ svg {
   border-radius: 12px;
   padding: 10px;
   background: linear-gradient(135deg, rgba(17, 30, 54, 0.92), rgba(10, 20, 39, 0.92));
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.spotify-liked-bulk:hover {
+  border-color: rgba(142, 214, 255, 0.56);
+  background: linear-gradient(135deg, rgba(24, 42, 74, 0.94), rgba(14, 28, 52, 0.94));
 }
 
 .spotify-liked-head {
@@ -579,15 +586,6 @@ svg {
 
 .spotify-liked-main {
   min-width: 0;
-}
-
-.spotify-liked-open-btn {
-  height: 30px;
-  min-height: 30px;
-  padding: 0 12px;
-  font-size: 0.74rem;
-  font-weight: 800;
-  white-space: nowrap;
 }
 
 .spotify-playlist-card {
