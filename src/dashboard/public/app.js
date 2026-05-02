@@ -110,6 +110,9 @@ const ANNOUNCEMENT_COOKIE = 'tunixbot_announcement_dismissed';
 const LYRICS_SYNC_DELAY_MS = -1000;
 const SERVER_PROGRESS_BACKWARD_TOLERANCE_MS = 350;
 const SERVER_PROGRESS_HARD_RESET_BACKWARD_MS = 3500;
+const SERVER_PROGRESS_SOFT_SYNC_DEADZONE_MS = 120;
+const SERVER_PROGRESS_SOFT_SYNC_FORWARD_STEP_MS = 480;
+const SERVER_PROGRESS_SOFT_SYNC_BACKWARD_STEP_MS = 220;
 let sessionInfo = null;
 let state = null;
 let canControl = false;
@@ -894,14 +897,38 @@ const syncProgressAnchorFromServer = (s) => {
     return;
   }
 
-  if (backwardDelta > SERVER_PROGRESS_BACKWARD_TOLERANCE_MS) {
-    // Small backward jitter: ignore to keep lyrics smooth and monotonic.
+  // Soft-sync server/client position to keep dashboard timer aligned with real playback
+  // without visible jumps when Lavalink samples jitter.
+  const driftMs = serverMs - liveBeforeSync;
+  if (Math.abs(driftMs) <= SERVER_PROGRESS_SOFT_SYNC_DEADZONE_MS) {
+    progressAnchorMs = liveBeforeSync;
+    progressAnchorTs = now;
     pendingHardBackwardSync = null;
     return;
   }
 
-  // Keep visual progress monotonic: accept forward corrections only.
-  progressAnchorMs = Math.max(serverMs, liveBeforeSync);
+  if (driftMs > 0) {
+    const step = Math.min(driftMs, SERVER_PROGRESS_SOFT_SYNC_FORWARD_STEP_MS);
+    progressAnchorMs = liveBeforeSync + step;
+    progressAnchorTs = now;
+    pendingHardBackwardSync = null;
+    return;
+  }
+
+  // drift < 0 (local timer ahead): allow controlled backward corrections.
+  // This keeps seconds and lyrics synced while avoiding hard visual snaps.
+  const backwardDrift = Math.abs(driftMs);
+  if (backwardDrift > SERVER_PROGRESS_BACKWARD_TOLERANCE_MS) {
+    const step = Math.min(backwardDrift, SERVER_PROGRESS_SOFT_SYNC_BACKWARD_STEP_MS);
+    progressAnchorMs = Math.max(0, liveBeforeSync - step);
+    progressAnchorTs = now;
+    pendingHardBackwardSync = null;
+    markLyricsBackwardSyncWindow(900);
+    return;
+  }
+
+  // Tiny backward jitter: keep previous anchor for visual stability.
+  progressAnchorMs = liveBeforeSync;
   progressAnchorTs = now;
   pendingHardBackwardSync = null;
 };
@@ -1709,6 +1736,8 @@ const stopPollingLoop = () => {
 
 const getPollIntervalMs = () => {
   if (state?.playlistLoad?.active) return 350;
+  if (state?.current && !state?.paused) return 1200;
+  if (state?.current && state?.paused) return 1600;
   return 2500;
 };
 
