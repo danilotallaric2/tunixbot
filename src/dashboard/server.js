@@ -110,7 +110,8 @@ const buildStateFromQueue = (client, queue) => {
           durationText: formatDuration(queue.current.duration),
           url: queue.current.url,
           thumbnail: queue.current.thumbnail,
-          requestedBy: queue.current.requestedBy
+          requestedBy: queue.current.requestedBy,
+          started: Boolean(queue.currentStarted)
         }
       : null,
     queue: queue.tracks.map((track) => ({
@@ -126,6 +127,7 @@ const buildStateFromQueue = (client, queue) => {
     loop: queue.loopMode,
     filter: queue.filter || 'clear',
     paused: queue.paused,
+    currentStarted: Boolean(queue.currentStarted),
     progressMs: position,
     progressText: formatDuration(position),
     totalMs: queue.current?.duration || 0

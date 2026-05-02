@@ -106,8 +106,8 @@ const nowPlayingInfoTrigger = document.getElementById('nowPlayingInfoTrigger');
 const loopModes = ['off', 'song', 'queue'];
 const ANNOUNCEMENT_VERSION = '1.0.5';
 const ANNOUNCEMENT_COOKIE = 'tunixbot_announcement_dismissed';
-// Negative value means "show lyrics earlier than audio".
-const LYRICS_SYNC_DELAY_MS = -1000;
+// Positive value delays lyrics, negative value anticipates lyrics.
+const LYRICS_SYNC_DELAY_MS = 0;
 const SERVER_PROGRESS_BACKWARD_TOLERANCE_MS = 350;
 const SERVER_PROGRESS_HARD_RESET_BACKWARD_MS = 3500;
 const SERVER_PROGRESS_SOFT_SYNC_DEADZONE_MS = 120;
@@ -834,6 +834,7 @@ const syncProgressAnchorFromServer = (s) => {
   const duration = s.current.duration || 0;
   const serverMsRaw = Math.max(0, Number(s.progressMs || 0));
   const serverMs = duration > 0 ? Math.min(serverMsRaw, duration) : serverMsRaw;
+  const currentStarted = Boolean(s.currentStarted ?? s.current?.started);
 
   if (progressTrackKey !== trackKey) {
     progressTrackKey = trackKey;
@@ -841,6 +842,14 @@ const syncProgressAnchorFromServer = (s) => {
     progressAnchorTs = now;
     pendingHardBackwardSync = null;
     markLyricsBackwardSyncWindow(2600);
+    return;
+  }
+
+  // Start gate: don't run the local clock before the track is actually started server-side.
+  if (!currentStarted) {
+    progressAnchorMs = serverMs;
+    progressAnchorTs = now;
+    pendingHardBackwardSync = null;
     return;
   }
 
@@ -935,6 +944,9 @@ const syncProgressAnchorFromServer = (s) => {
 
 const getLiveProgressMs = () => {
   if (!state?.current) return 0;
+
+  const currentStarted = Boolean(state.currentStarted ?? state.current?.started);
+  if (!currentStarted) return Math.max(0, progressAnchorMs || 0);
 
   const duration = state.current.duration || 0;
   if (state.paused) return duration > 0 ? Math.min(progressAnchorMs, duration) : progressAnchorMs;

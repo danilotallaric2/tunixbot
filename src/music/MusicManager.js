@@ -228,6 +228,12 @@ class MusicManager {
     let computed = base + elapsed;
     if (duration > 0) computed = Math.min(computed, duration);
 
+    // Hard gate: before the real Lavalink `start` event, keep position stable.
+    // This prevents dashboard/lyrics from running ahead while the track is still buffering/loading.
+    if (!queue.currentStarted) {
+      return duration > 0 ? Math.min(base, duration) : base;
+    }
+
     const playerPosition = Number(queue.player?.position);
     if (Number.isFinite(playerPosition) && playerPosition >= 0) {
       const safePlayer = duration > 0 ? Math.min(playerPosition, duration) : playerPosition;
@@ -1564,6 +1570,8 @@ class MusicManager {
     queue.current = replacement;
     queue.currentSessionId += 1;
     queue.currentStarted = false;
+    queue.lastNodePositionMs = null;
+    queue.lastNodePositionChangedAt = 0;
     this.resetPositionClock(queue, 0);
     queue.paused = false;
     const locale = this.resolveQueueLocale(queue);
@@ -1836,6 +1844,8 @@ class MusicManager {
     queue.paused = false;
     queue.positionOffsetMs = 0;
     queue.startedAt = 0;
+    queue.lastNodePositionMs = null;
+    queue.lastNodePositionChangedAt = 0;
     await this.playNext(queue, { lastTrack: finishedTrack, endReason: reason });
     this.scheduleSessionStateSave();
   }
@@ -1862,6 +1872,10 @@ class MusicManager {
     queue.current = next;
     queue.currentSessionId += 1;
     queue.currentStarted = false;
+    queue.positionOffsetMs = 0;
+    queue.startedAt = 0;
+    queue.lastNodePositionMs = null;
+    queue.lastNodePositionChangedAt = 0;
 
     try {
       await queue.player.playTrack({
