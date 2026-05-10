@@ -9,7 +9,6 @@ const { formatDuration } = require('../utils/time');
 const JsonSessionStore = require('./jsonSessionStore');
 const SpotifyUserStore = require('./spotifyUserStore');
 const { normalizeLocale, t, localizeErrorMessage } = require('../utils/i18n');
-const { Webhook } = require('@top-gg/sdk');
 const { normalizeTopggWebhookPath, normalizeTopggVotePayload } = require('../utils/topgg');
 
 const DISCORD_API = 'https://discord.com/api/v10';
@@ -141,7 +140,14 @@ const createDashboardServer = (client) => {
   const dashboardSessionStore = new JsonSessionStore(path.join(__dirname, '..', 'data', 'dashboard-sessions.json'), {
     ttlMs: SESSION_MAX_AGE_MS
   });
-  app.use(express.json({ limit: '1mb' }));
+  app.use(
+    express.json({
+      limit: '1mb',
+      verify: (req, _res, buf) => {
+        req.rawBody = Buffer.from(buf);
+      }
+    })
+  );
   app.use(
     session({
       store: dashboardSessionStore,
@@ -874,6 +880,32 @@ const createDashboardServer = (client) => {
   const topggWebhookPath = normalizeTopggWebhookPath(config.topgg.webhookPath);
   const topggVoteChannelId = String(config.notifications.topggVoteChannelId || '').trim();
 
+  const safeStringEqual = (left, right) => {
+    const a = Buffer.from(String(left || ''), 'utf8');
+    const b = Buffer.from(String(right || ''), 'utf8');
+    if (a.length !== b.length) return false;
+    return crypto.timingSafeEqual(a, b);
+  };
+
+  const verifyTopggV2Signature = (rawBodyBuffer, signatureHeader, secret) => {
+    const header = String(signatureHeader || '').trim();
+    if (!header) return { ok: false, reason: 'missing_signature_header' };
+    const parts = header.split(',').map((part) => part.trim());
+    const timestamp = parts.find((part) => part.startsWith('t='))?.slice(2) || '';
+    const received = parts.find((part) => part.startsWith('v1='))?.slice(3) || '';
+    if (!timestamp || !received) return { ok: false, reason: 'invalid_signature_header' };
+
+    const rawBody = Buffer.isBuffer(rawBodyBuffer)
+      ? rawBodyBuffer.toString('utf8')
+      : typeof rawBodyBuffer === 'string'
+        ? rawBodyBuffer
+        : '';
+    if (!rawBody) return { ok: false, reason: 'missing_raw_body' };
+
+    const expected = crypto.createHmac('sha256', secret).update(`${timestamp}.${rawBody}`, 'utf8').digest('hex');
+    return { ok: safeStringEqual(received, expected), reason: 'signature_mismatch' };
+  };
+
   const sendTopggVoteNotification = async (votePayload) => {
     if (!topggVoteChannelId) return;
     const vote = normalizeTopggVotePayload(votePayload);
@@ -906,15 +938,42 @@ const createDashboardServer = (client) => {
   };
 
   if (topggWebhookAuth) {
-    const webhook = new Webhook(topggWebhookAuth);
-    app.post(
-      topggWebhookPath,
-      webhook.listener(async (vote) => {
-        sendTopggVoteNotification(vote).catch((error) => {
-          logger.warn(`Top.gg vote handler failed: ${error?.message || error}`);
-        });
-      })
-    );
+    app.post(topggWebhookPath, async (req, res) => {
+      const authorizationHeader = String(req.headers.authorization || '').trim();
+      const signatureHeader = String(req.headers['x-topgg-signature'] || '').trim();
+
+      let authorized = false;
+      let authMode = 'none';
+
+      // V2 webhooks: x-topgg-signature (recommended by new docs)
+      if (signatureHeader) {
+        const signatureCheck = verifyTopggV2Signature(req.rawBody, signatureHeader, topggWebhookAuth);
+        authorized = Boolean(signatureCheck.ok);
+        authMode = 'signature';
+      } else if (authorizationHeader) {
+        // Legacy webhooks: Authorization header
+        authorized = safeStringEqual(authorizationHeader, topggWebhookAuth);
+        authMode = 'authorization';
+      }
+
+      if (!authorized) {
+        logger.warn(`Top.gg webhook rejected (${authMode}) path=${topggWebhookPath}`);
+        res.status(403).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      const payload = req.body && typeof req.body === 'object' ? req.body : null;
+      if (!payload) {
+        res.status(400).json({ error: 'Invalid body' });
+        return;
+      }
+
+      sendTopggVoteNotification(payload).catch((error) => {
+        logger.warn(`Top.gg vote handler failed: ${error?.message || error}`);
+      });
+
+      res.sendStatus(204);
+    });
     logger.info(`Top.gg webhook enabled on path: ${topggWebhookPath}`);
   } else {
     logger.info('Top.gg webhook disabled: TOPGG_WEBHOOK_AUTH missing.');
