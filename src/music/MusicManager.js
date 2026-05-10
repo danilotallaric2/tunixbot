@@ -1372,88 +1372,6 @@ class MusicManager {
     return this.buildTrack(bestRaw, requestedBy, spotifyTrack);
   }
 
-  buildGenericFallbackQueries(track) {
-    const primaryArtist = String(track.author || '').split(',')[0].trim();
-    const cleanTitle = this.cleanSpotifyTitle(track.title);
-    const rawTitle = String(track.title || '').trim();
-
-    const queries = [
-      `ytmsearch:${rawTitle} ${track.author || ''}`,
-      `ytsearch:${rawTitle} ${track.author || ''}`,
-      `ytmsearch:${cleanTitle} ${primaryArtist}`,
-      `ytsearch:${cleanTitle} ${primaryArtist}`,
-      `ytmsearch:${cleanTitle}`,
-      `ytsearch:${cleanTitle}`
-    ];
-
-    const unique = [];
-    const seen = new Set();
-    for (const q of queries) {
-      const key = this.normalizeCompareText(q);
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      unique.push(q);
-    }
-
-    return unique;
-  }
-
-  buildFallbackSignature(rawTrack) {
-    const info = rawTrack?.info || {};
-    return `${rawTrack?.encoded || ''}|${info.uri || ''}|${info.identifier || ''}`;
-  }
-
-  async resolveFallbackForTrack(node, failedTrack) {
-    const queries = this.buildGenericFallbackQueries(failedTrack);
-    if (!queries.length) return null;
-
-    const pseudoSpotifyTrack = {
-      title: failedTrack.title,
-      author: failedTrack.author,
-      duration: failedTrack.duration
-    };
-    const triedSet = new Set(failedTrack.triedFallbackSignatures || []);
-    triedSet.add(`${failedTrack.encoded || ''}|${failedTrack.url || ''}|`);
-
-    let bestRaw = null;
-    let bestScore = Number.NEGATIVE_INFINITY;
-
-    for (const query of queries) {
-      const result = await this.searchLavalink(node, query);
-      const candidates = result.tracks.slice(0, 6);
-      if (!candidates.length) continue;
-
-      for (const raw of candidates) {
-        const signature = this.buildFallbackSignature(raw);
-        if (triedSet.has(signature)) continue;
-
-        const score = this.scoreSpotifyCandidate(raw, pseudoSpotifyTrack);
-        if (score > bestScore) {
-          bestScore = score;
-          bestRaw = raw;
-        }
-      }
-
-      if (bestScore >= 85) break;
-    }
-
-    // Too low score usually means wrong song; better skip than play random.
-    if (!bestRaw || bestScore < 42) return null;
-
-    const signature = this.buildFallbackSignature(bestRaw);
-    const triedFallbackSignatures = [...triedSet, signature];
-
-    return this.buildTrack(bestRaw, failedTrack.requestedBy, {
-      title: failedTrack.title,
-      author: failedTrack.author,
-      duration: failedTrack.duration,
-      url: failedTrack.url,
-      thumbnail: failedTrack.thumbnail,
-      recoveryAttempts: Number(failedTrack.recoveryAttempts || 0) + 1,
-      triedFallbackSignatures
-    });
-  }
-
   collectAutoplayExcludeKeys(queue, seedTrack) {
     const excluded = new Set();
 
@@ -1596,54 +1514,6 @@ class MusicManager {
     });
 
     return true;
-  }
-
-  async tryRecoverFailedTrack(queue, failedTrack) {
-    const attempts = Number(failedTrack?.recoveryAttempts || 0);
-    if (!failedTrack || attempts >= 2) return false;
-
-    const node = queue.player.node || this.getIdealNodeSafe();
-    if (!node) return false;
-
-    let replacement;
-    try {
-      replacement = await this.resolveFallbackForTrack(node, failedTrack);
-    } catch (error) {
-      logger.warn(`Fallback resolve failed for guild ${queue.guildId}: ${error.message || error}`);
-      return false;
-    }
-
-    if (!replacement) return false;
-
-    queue.current = replacement;
-    queue.currentSessionId += 1;
-    queue.currentStarted = false;
-    queue.lastNodePositionMs = null;
-    queue.lastNodePositionChangedAt = 0;
-    this.resetPositionClock(queue, 0);
-    queue.paused = false;
-    const locale = this.resolveQueueLocale(queue);
-
-    await this.safeTextSend(queue.textChannelId, {
-      embeds: [
-        baseEmbed(t(locale, 'embeds.trackRecoverTitle'), config.theme.warning).setDescription(
-          t(locale, 'embeds.trackRecoverFallbackMessage', { title: failedTrack.title })
-        )
-      ]
-    });
-
-    try {
-      await queue.player.playTrack({
-        track: {
-          encoded: replacement.encoded
-        }
-      });
-      this.armTrackStartTimeout(queue, queue.currentSessionId);
-      return true;
-    } catch (error) {
-      logger.warn(`Fallback play failed for guild ${queue.guildId}: ${error.message || error}`);
-      return false;
-    }
   }
 
   async resolvePlayableTracks(node, query, requestedBy, options = {}) {
@@ -1831,15 +1701,10 @@ class MusicManager {
       if (!latest) return;
       if (!latest.current || latest.currentSessionId !== expectedSessionId) return;
       if (latest.currentStarted) return;
-      const locale = this.resolveQueueLocale(latest);
 
-      await this.safeTextSend(latest.textChannelId, {
-        embeds: [
-          baseEmbed(t(locale, 'embeds.trackRecoverTitle'), config.theme.warning).setDescription(
-            t(locale, 'embeds.trackRecoverTimeoutMessage', { title: latest.current.title })
-          )
-        ]
-      });
+      logger.warn(
+        `Track start timeout in guild ${latest.guildId}. Skipping to next track: ${latest.current?.title || 'Unknown Title'}`
+      );
 
       await this.onTrackEnd(latest, 'loadFailed');
     }, MusicManager.TRACK_START_TIMEOUT_MS);
@@ -1857,23 +1722,6 @@ class MusicManager {
 
     if (reason !== 'finished') {
       this.logTrackFailureContext(queue, `track_end:${reason}`, { reason, playedMs }, finishedTrack);
-    }
-
-    if (reason === 'loadFailed' && finishedTrack) {
-      const recovered = await this.tryRecoverFailedTrack(queue, finishedTrack);
-      if (recovered) return;
-      logger.warn(`Track recovery failed for guild ${queue.guildId}: ${finishedTrack.title} - ${finishedTrack.author}`);
-    }
-
-    const suspiciousInstantFinish =
-      reason === 'finished' &&
-      finishedTrack &&
-      Number(finishedTrack.duration || 0) > 15000 &&
-      playedMs > 0 &&
-      playedMs < 3500;
-    if (suspiciousInstantFinish) {
-      const recovered = await this.tryRecoverFailedTrack(queue, finishedTrack);
-      if (recovered) return;
     }
 
     if (reason === 'finished' && finishedTrack) {
