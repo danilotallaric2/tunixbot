@@ -36,7 +36,7 @@ module.exports = {
       await interaction.reply({
         embeds: [errorEmbed(t(locale, 'embeds.loopErrorTitle'), error.message, locale)],
         ephemeral: true
-      });
+      }); 
     }
   }
 };
