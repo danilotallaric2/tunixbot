@@ -62,6 +62,11 @@ const config = {
     dashboardUsersFile:
       process.env.SPOTIFY_DASHBOARD_USERS_FILE || path.join(__dirname, 'data', 'spotify-users.json')
   },
+  topgg: {
+    token: process.env.TOPGG_TOKEN || '',
+    webhookAuth: process.env.TOPGG_WEBHOOK_AUTH || '',
+    webhookPath: process.env.TOPGG_WEBHOOK_PATH || '/dblwebhook'
+  },
   music: {
     defaultVolume: parseIntOr(process.env.DEFAULT_VOLUME, 80),
     maxQueueSize: parseIntOr(process.env.MAX_QUEUE_SIZE, 500),
@@ -85,7 +90,9 @@ const config = {
   },
   notifications: {
     guildJoinChannelId: process.env.GUILD_JOIN_LOG_CHANNEL_ID || '1235541924547661854',
-    guildLeaveChannelId: process.env.GUILD_LEAVE_LOG_CHANNEL_ID || '1235541940901249074'
+    guildLeaveChannelId: process.env.GUILD_LEAVE_LOG_CHANNEL_ID || '1235541940901249074',
+    dashboardOpenChannelId: process.env.DASHBOARD_OPEN_LOG_CHANNEL_ID || '1235541954893320223',
+    topggVoteChannelId: process.env.TOPGG_VOTE_LOG_CHANNEL_ID || '1246493294268256287'
   },
   theme: {
     primary: 0x6d5cff,

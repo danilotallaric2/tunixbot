@@ -9,6 +9,8 @@ const { formatDuration } = require('../utils/time');
 const JsonSessionStore = require('./jsonSessionStore');
 const SpotifyUserStore = require('./spotifyUserStore');
 const { normalizeLocale, t, localizeErrorMessage } = require('../utils/i18n');
+const { Webhook } = require('@top-gg/sdk');
+const { normalizeTopggWebhookPath, normalizeTopggVotePayload } = require('../utils/topgg');
 
 const DISCORD_API = 'https://discord.com/api/v10';
 const SPOTIFY_ACCOUNTS_API = 'https://accounts.spotify.com/api';
@@ -162,6 +164,73 @@ const createDashboardServer = (client) => {
       return;
     }
     next();
+  };
+
+  const dashboardOpenNotifyChannelId = String(config.notifications.dashboardOpenChannelId || '').trim();
+  const dashboardOpenNotifyCooldownMs = 30_000;
+  const dashboardOpenNotifyRecent = new Map();
+
+  const pruneDashboardOpenNotifyCache = () => {
+    if (dashboardOpenNotifyRecent.size <= 3000) return;
+    const now = Date.now();
+    for (const [key, ts] of dashboardOpenNotifyRecent.entries()) {
+      if (now - Number(ts || 0) > dashboardOpenNotifyCooldownMs * 3) {
+        dashboardOpenNotifyRecent.delete(key);
+      }
+    }
+  };
+
+  const shouldNotifyDashboardOpen = (req) => {
+    if (!dashboardOpenNotifyChannelId) return false;
+    if (req.method !== 'GET') return false;
+
+    const pathname = String(req.path || req.originalUrl || '').toLowerCase();
+    if (!pathname) return false;
+    if (pathname.startsWith('/api/')) return false;
+    if (pathname.startsWith('/auth/')) return false;
+    if (pathname === '/terms' || pathname === '/privacy') return false;
+
+    // Avoid static assets (css/js/png/svg/etc): notify only real dashboard document requests.
+    if (pathname.includes('.') && pathname !== '/index.html') return false;
+
+    const accepts = String(req.headers.accept || '').toLowerCase();
+    if (accepts && !accepts.includes('text/html')) return false;
+    return true;
+  };
+
+  const notifyDashboardOpen = async (req) => {
+    if (!shouldNotifyDashboardOpen(req)) return;
+
+    const sessionUser = req.session?.user || null;
+    const actorKey = sessionUser?.id
+      ? `user:${sessionUser.id}`
+      : `guest:${String(req.ip || 'unknown').slice(0, 80)}:${String(req.headers['user-agent'] || '').slice(0, 50)}`;
+    const now = Date.now();
+    const last = Number(dashboardOpenNotifyRecent.get(actorKey) || 0);
+    if (now - last < dashboardOpenNotifyCooldownMs) return;
+
+    dashboardOpenNotifyRecent.set(actorKey, now);
+    pruneDashboardOpenNotifyCache();
+
+    const channel = await client.channels.fetch(dashboardOpenNotifyChannelId).catch(() => null);
+    if (!channel || !channel.isTextBased()) {
+      logger.warn(`Dashboard open notification channel not found or not text-based: ${dashboardOpenNotifyChannelId}`);
+      return;
+    }
+
+    const displayName =
+      sessionUser?.globalName || sessionUser?.username || (sessionUser?.id ? `User ${sessionUser.id}` : 'Guest');
+    const userLabel = sessionUser?.id ? `${displayName} (${sessionUser.id})` : displayName;
+    const locale = sessionUser?.locale || 'en';
+    const sourcePath = String(req.path || '/');
+
+    await channel
+      .send({
+        content: `🟦 Dashboard aperta da **${userLabel}** • locale: \`${locale}\` • path: \`${sourcePath}\``
+      })
+      .catch((error) => {
+        logger.warn(`Failed to send dashboard-open notification: ${error?.message || error}`);
+      });
   };
 
   const spotifyAllowedDiscordIds = new Set((config.spotify.dashboardAllowedDiscordIds || []).map((id) => String(id)));
@@ -801,6 +870,56 @@ const createDashboardServer = (client) => {
 
   const publicDir = path.join(__dirname, 'public');
 
+  const topggWebhookAuth = String(config.topgg.webhookAuth || '').trim();
+  const topggWebhookPath = normalizeTopggWebhookPath(config.topgg.webhookPath);
+  const topggVoteChannelId = String(config.notifications.topggVoteChannelId || '').trim();
+
+  const sendTopggVoteNotification = async (votePayload) => {
+    if (!topggVoteChannelId) return;
+    const vote = normalizeTopggVotePayload(votePayload);
+    if (!vote) return;
+
+    const channel = await client.channels.fetch(topggVoteChannelId).catch(() => null);
+    if (!channel || !channel.isTextBased()) {
+      logger.warn(`Top.gg vote log channel not found or not text-based: ${topggVoteChannelId}`);
+      return;
+    }
+
+    const isTest = vote.voteType === 'test' || vote.rawType === 'webhook.test';
+    const mention = vote.userDiscordId ? `<@${vote.userDiscordId}>` : vote.username ? `**${vote.username}**` : '`unknown-user`';
+    const multiplier = vote.weight > 1 ? ` x${vote.weight}` : '';
+    const querySuffix = vote.query ? ` • query: \`${vote.query}\`` : '';
+    const base = isTest ? '🧪 Top.gg webhook test ricevuto' : '🗳️ Nuovo voto Top.gg ricevuto';
+
+    const details = [
+      `${base} da ${mention}${multiplier}`,
+      `type: \`${vote.rawType || vote.voteType}\`${vote.schema ? ` • schema: \`${vote.schema}\`` : ''}`,
+      vote.projectDiscordId ? `project: \`${vote.projectDiscordId}\`` : null,
+      vote.userTopggId ? `topgg user: \`${vote.userTopggId}\`` : null
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    await channel.send({ content: `${details}${querySuffix}` }).catch((error) => {
+      logger.warn(`Failed to send Top.gg vote notification: ${error?.message || error}`);
+    });
+  };
+
+  if (topggWebhookAuth) {
+    const webhook = new Webhook(topggWebhookAuth);
+    app.post(
+      topggWebhookPath,
+      webhook.listener(async (vote) => {
+        sendTopggVoteNotification(vote).catch((error) => {
+          logger.warn(`Top.gg vote handler failed: ${error?.message || error}`);
+        });
+      })
+    );
+    logger.info(`Top.gg webhook enabled on path: ${topggWebhookPath}`);
+  } else {
+    logger.info('Top.gg webhook disabled: TOPGG_WEBHOOK_AUTH missing.');
+  }
+
   app.get('/terms', (_req, res) => {
     res.sendFile(path.join(publicDir, 'terms.html'));
   });
@@ -1213,6 +1332,13 @@ const createDashboardServer = (client) => {
     } catch (error) {
       res.status(404).json({ error: formatApiError(req, error, 'dashboard.errorLyrics') });
     }
+  });
+
+  app.use((req, _res, next) => {
+    notifyDashboardOpen(req).catch((error) => {
+      logger.warn(`Dashboard open notification failed: ${error?.message || error}`);
+    });
+    next();
   });
 
   app.use(express.static(path.join(__dirname, 'public')));
