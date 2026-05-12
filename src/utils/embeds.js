@@ -116,6 +116,8 @@ const helpEmbed = (locale = 'en') => {
           '`/seek <tempo>` - Vai a tempo (es. 1:30)',
           '`/lyrics` - Cerca testo del brano attuale',
           '`/filter bassboost/nightcore/vaporwave/8d/clear` - Filtri audio',
+          '`/supporto` - Entra nel server supporto',
+          '`/vota` - Supporta TunixBot su Top.gg',
           '`/help` - Questo menu'
         ]
       : [
@@ -135,6 +137,8 @@ const helpEmbed = (locale = 'en') => {
           '`/seek <time>` - Jump to time (e.g. 1:30)',
           '`/lyrics` - Get lyrics for current track',
           '`/filter bassboost/nightcore/vaporwave/8d/clear` - Audio filters',
+          '`/support` - Join the support server',
+          '`/vote` - Support TunixBot on Top.gg',
           '`/help` - This menu'
         ];
 
