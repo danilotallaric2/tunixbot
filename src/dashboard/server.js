@@ -1299,7 +1299,7 @@ const createDashboardServer = (client) => {
 
   app.post('/api/play', requireAuth, async (req, res) => {
     const { query } = req.body || {};
-    const source = parseSearchSource(String(req.body?.source || 'youtube').toLowerCase());
+    const source = parseSearchSource(String(req.body?.source || 'spotify').toLowerCase());
 
     if (!query) {
       res.status(400).json({ error: tr(req, 'dashboard.missingQuery') });

@@ -1518,7 +1518,7 @@ class MusicManager {
 
   async resolvePlayableTracks(node, query, requestedBy, options = {}) {
     const resolvedMarket = this.resolveSpotifyMarket(options.spotifyMarket || options.locale);
-    const source = ['spotify', 'youtube_music', 'youtube'].includes(options.source) ? options.source : 'youtube';
+    const source = ['spotify', 'youtube_music', 'youtube'].includes(options.source) ? options.source : 'spotify';
 
     if (SpotifyService.isSpotifyUrl(query)) {
       const resolved = await this.spotify.resolve(query, { market: resolvedMarket });
@@ -1951,7 +1951,7 @@ class MusicManager {
     userLocale = null,
     spotifyMarket = null,
     allowAsyncPlaylistLoad = false,
-    source = 'youtube'
+    source = 'spotify'
   }) {
     this.assertLavalinkAvailable();
     const resolvedSpotifyMarket = this.resolveSpotifyMarket(spotifyMarket || userLocale || locale);
@@ -2181,7 +2181,7 @@ class MusicManager {
     };
   }
 
-  async play(interaction, query, voiceChannel) {
+  async play(interaction, query, voiceChannel, options = {}) {
     const locale = getInteractionLocale(interaction);
     const userLocale = interaction?.locale || interaction?.guildLocale || locale;
     const result = await this.enqueueQuery({
@@ -2191,7 +2191,8 @@ class MusicManager {
       textChannelId: interaction.channelId,
       requestedBy: interaction.user.id,
       locale,
-      userLocale
+      userLocale,
+      source: options.source || 'spotify'
     });
 
     if (!interaction.deferred && !interaction.replied) {

@@ -15,6 +15,18 @@ module.exports = {
         .setDescription('Title, YouTube URL or Spotify URL')
         .setDescriptionLocalizations({ it: t('it', 'commands.optionQuery') })
         .setRequired(true)
+    )
+    .addStringOption((option) =>
+      option
+        .setName('source')
+        .setDescription('Search source to use when query is not a link')
+        .setDescriptionLocalizations({ it: t('it', 'commands.optionSource') })
+        .setRequired(false)
+        .addChoices(
+          { name: 'Spotify', value: 'spotify' },
+          { name: 'YouTube Music', value: 'youtube_music' },
+          { name: 'YouTube', value: 'youtube' }
+        )
     ),
   async execute(interaction) {
     const voiceChannel = await requireVoiceForPlay(interaction);
@@ -22,10 +34,11 @@ module.exports = {
 
     const locale = getInteractionLocale(interaction);
     const query = interaction.options.getString('query', true);
+    const source = interaction.options.getString('source') || 'spotify';
 
     try {
       await interaction.deferReply();
-      await interaction.client.musicManager.play(interaction, query, voiceChannel);
+      await interaction.client.musicManager.play(interaction, query, voiceChannel, { source });
     } catch (error) {
       await safeReply(interaction, {
         embeds: [
