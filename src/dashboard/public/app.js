@@ -261,6 +261,7 @@ const I18N = {
     },
     sources: {
       spotify: 'Spotify',
+      youtubeMusic: 'YouTube Music',
       youtube: 'YouTube',
       external: 'External Link'
     },
@@ -393,6 +394,7 @@ const I18N = {
     },
     sources: {
       spotify: 'Spotify',
+      youtubeMusic: 'YouTube Music',
       youtube: 'YouTube',
       external: 'Link esterno'
     },
@@ -499,6 +501,21 @@ const getSpotifyQueueAllLabel = () => {
   return isLiked ? tr('ui.spotifyLikedQueueAll') : tr('ui.spotifyPlaylistQueueAll');
 };
 
+const normalizeSearchSource = (source) => {
+  if (source === 'youtube_music' || source === 'youtube-music' || source === 'ytmusic') return 'youtube_music';
+  if (source === 'youtube') return 'youtube';
+  return 'spotify';
+};
+
+const getSelectedSearchSource = () => normalizeSearchSource(searchSourceSelect?.value || 'spotify');
+
+const getSourceLabel = (source) => {
+  const normalized = normalizeSearchSource(source);
+  if (normalized === 'youtube_music') return tr('sources.youtubeMusic');
+  if (normalized === 'youtube') return tr('sources.youtube');
+  return tr('sources.spotify');
+};
+
 const setBootLoadingVisible = (visible) => {
   if (!bootSplash) return;
   bootSplash.classList.toggle('hidden', !visible);
@@ -593,9 +610,8 @@ const applyLocale = (locale) => {
   if (spotifyPlaylistTitle && !spotifySelectedPlaylist) spotifyPlaylistTitle.textContent = tr('ui.spotifyPlaylistTitle');
 
   for (const btn of sourceOptionButtons) {
-    const key = btn.dataset.sourceOption === 'youtube' ? 'sources.youtube' : 'sources.spotify';
     const label = btn.querySelector('span');
-    if (label) label.textContent = tr(key);
+    if (label) label.textContent = getSourceLabel(btn.dataset.sourceOption);
   }
 
   if (spotifyLibrary) renderSpotifyLibrary(spotifyLibrary);
@@ -696,10 +712,10 @@ const setPlayPauseVisual = (button, paused = true) => {
 
 const updateSourceBadge = () => {
   if (!searchSourceSelect) return;
-  const source = searchSourceSelect.value === 'youtube' ? 'youtube' : 'spotify';
+  const source = getSelectedSearchSource();
 
   for (const button of sourceOptionButtons) {
-    const active = button.dataset.sourceOption === source;
+    const active = normalizeSearchSource(button.dataset.sourceOption) === source;
     button.classList.toggle('active', active);
     button.setAttribute('aria-pressed', active ? 'true' : 'false');
   }
@@ -707,7 +723,7 @@ const updateSourceBadge = () => {
 
 const setSearchSource = (source, options = {}) => {
   if (!searchSourceSelect) return;
-  searchSourceSelect.value = source === 'youtube' ? 'youtube' : 'spotify';
+  searchSourceSelect.value = normalizeSearchSource(source);
   updateSourceBadge();
 
   const q = searchInput.value.trim();
@@ -1500,7 +1516,7 @@ const buildCard = (track) => {
 
   card.querySelector('button').addEventListener('click', (event) => {
     event.stopPropagation();
-    enqueue(track.url || `${track.title} ${track.author}`);
+    enqueue(track.url || `${track.title} ${track.author}`, { source: track.source });
   });
 
   card.addEventListener('click', () => {
@@ -1676,11 +1692,11 @@ const search = async (query) => {
 
   try {
     setStatus(tr('status.searching'));
-    const source = searchSourceSelect.value || 'spotify';
+    const source = getSelectedSearchSource();
     const { tracks } = await api(`/api/search?q=${encodeURIComponent(q)}&source=${encodeURIComponent(source)}`);
     renderResults(tracks);
     setViewMode('results');
-    const sourceLabel = source === 'spotify' ? tr('sources.spotify') : tr('sources.youtube');
+    const sourceLabel = getSourceLabel(source);
     setStatus(tr('status.foundTracks', { count: tracks.length, source: sourceLabel }));
   } catch (error) {
     setStatus(error.message, true);
@@ -1692,14 +1708,15 @@ const loadDiscover = async () => {
   renderDiscover(sections);
 };
 
-const enqueue = async (query) => {
+const enqueue = async (query, options = {}) => {
   try {
     ensureCanControl();
     setStatus(tr('status.queueAdding'));
+    const source = normalizeSearchSource(options.source || getSelectedSearchSource());
     const payload = await api('/api/play', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query })
+      body: JSON.stringify({ query, source })
     });
 
     await refreshSession();
@@ -1853,7 +1870,7 @@ searchInput.addEventListener('input', () => {
 });
 playBtn.addEventListener('click', () => {
   const q = searchInput.value.trim();
-  if (q) enqueue(q);
+  if (q) enqueue(q, { source: getSelectedSearchSource() });
 });
 
 refreshBtn.addEventListener('click', () => refreshSession());

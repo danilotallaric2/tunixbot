@@ -27,6 +27,7 @@ const parseLoopMode = (value) => {
 };
 
 const parseSearchSource = (value) => {
+  if (value === 'youtube_music' || value === 'youtube-music' || value === 'ytmusic') return 'youtube_music';
   if (value === 'youtube') return 'youtube';
   return 'spotify';
 };
@@ -1298,6 +1299,7 @@ const createDashboardServer = (client) => {
 
   app.post('/api/play', requireAuth, async (req, res) => {
     const { query } = req.body || {};
+    const source = parseSearchSource(String(req.body?.source || 'youtube').toLowerCase());
 
     if (!query) {
       res.status(400).json({ error: tr(req, 'dashboard.missingQuery') });
@@ -1315,6 +1317,7 @@ const createDashboardServer = (client) => {
         voiceChannelId: queue.voiceChannelId,
         textChannelId: queue.textChannelId,
         query,
+        source,
         requestedBy: req.session.user.id,
         locale,
         userLocale: userLocaleRaw,

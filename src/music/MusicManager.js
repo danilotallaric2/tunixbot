@@ -1295,12 +1295,12 @@ class MusicManager {
     const rawTitle = String(spotifyTrack.title || '').trim();
 
     const queries = [
-      `ytmsearch:${rawTitle} ${spotifyTrack.author}`,
       `ytsearch:${rawTitle} ${spotifyTrack.author}`,
-      `ytmsearch:${cleanTitle} ${primaryArtist}`,
+      `ytmsearch:${rawTitle} ${spotifyTrack.author}`,
       `ytsearch:${cleanTitle} ${primaryArtist}`,
-      `ytmsearch:${cleanTitle}`,
-      `ytsearch:${cleanTitle}`
+      `ytmsearch:${cleanTitle} ${primaryArtist}`,
+      `ytsearch:${cleanTitle}`,
+      `ytmsearch:${cleanTitle}`
     ];
 
     const unique = [];
@@ -1518,6 +1518,7 @@ class MusicManager {
 
   async resolvePlayableTracks(node, query, requestedBy, options = {}) {
     const resolvedMarket = this.resolveSpotifyMarket(options.spotifyMarket || options.locale);
+    const source = ['spotify', 'youtube_music', 'youtube'].includes(options.source) ? options.source : 'youtube';
 
     if (SpotifyService.isSpotifyUrl(query)) {
       const resolved = await this.spotify.resolve(query, { market: resolvedMarket });
@@ -1561,11 +1562,36 @@ class MusicManager {
       };
     }
 
-    const ytm = await this.searchLavalink(node, `ytmsearch:${query}`);
-    let candidates = ytm.tracks;
-    if (!candidates.length) {
-      const yt = await this.searchLavalink(node, `ytsearch:${query}`);
-      candidates = yt.tracks;
+    let candidates = [];
+
+    if (source === 'spotify') {
+      if (!this.spotify.enabled || !this.spotify.api) {
+        throw new Error('Spotify non configurato. Imposta SPOTIFY_CLIENT_ID e SPOTIFY_CLIENT_SECRET.');
+      }
+
+      const result = await this.spotify.api.searchTracks(query, {
+        limit: 1,
+        market: resolvedMarket
+      });
+      const spotifyTrack = result.body?.tracks?.items?.[0] ? this.spotify.mapTrack(result.body.tracks.items[0]) : null;
+      const resolvedTrack = spotifyTrack ? await this.resolveSingleSpotifyTrack(node, spotifyTrack, requestedBy) : null;
+      return {
+        tracks: resolvedTrack ? [resolvedTrack] : [],
+        playlistName: null,
+        sourceKind: 'track',
+        requestedCount: resolvedTrack ? 1 : 0,
+        skippedCount: resolvedTrack ? 0 : 1
+      };
+    } else {
+      const primaryPrefix = source === 'youtube_music' ? 'ytmsearch' : 'ytsearch';
+      const fallbackPrefix = source === 'youtube_music' ? 'ytsearch' : 'ytmsearch';
+      const primary = await this.searchLavalink(node, `${primaryPrefix}:${query}`);
+      candidates = primary.tracks;
+
+      if (!candidates.length) {
+        const fallback = await this.searchLavalink(node, `${fallbackPrefix}:${query}`);
+        candidates = fallback.tracks;
+      }
     }
 
     const mappedTracks = candidates.map((t) => this.buildTrack(t, requestedBy));
@@ -1924,7 +1950,8 @@ class MusicManager {
     locale = 'en',
     userLocale = null,
     spotifyMarket = null,
-    allowAsyncPlaylistLoad = false
+    allowAsyncPlaylistLoad = false,
+    source = 'youtube'
   }) {
     this.assertLavalinkAvailable();
     const resolvedSpotifyMarket = this.resolveSpotifyMarket(spotifyMarket || userLocale || locale);
@@ -2039,7 +2066,8 @@ class MusicManager {
     if (!resolved) {
       resolved = await this.resolvePlayableTracks(node, query, requestedBy, {
         locale,
-        spotifyMarket: resolvedSpotifyMarket
+        spotifyMarket: resolvedSpotifyMarket,
+        source
       });
     }
     if (!resolved.tracks.length) {
@@ -2662,7 +2690,8 @@ class MusicManager {
     const node = this.getIdealNodeSafe();
     if (!node) throw new Error('Nessun nodo Lavalink disponibile.');
 
-    const result = await this.searchLavalink(node, `ytmsearch:${query}`);
+    const prefix = source === 'youtube_music' ? 'ytmsearch' : 'ytsearch';
+    const result = await this.searchLavalink(node, `${prefix}:${query}`);
     return result.tracks.slice(0, limit).map((raw) => {
       const track = this.buildTrack(raw, 'dashboard');
       return {
@@ -2671,7 +2700,7 @@ class MusicManager {
         duration: track.duration,
         url: track.url,
         thumbnail: track.thumbnail,
-        source: 'youtube'
+        source: source === 'youtube_music' ? 'youtube_music' : 'youtube'
       };
     });
   }
