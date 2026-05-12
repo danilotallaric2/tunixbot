@@ -101,7 +101,15 @@ module.exports = {
     if (message.author?.bot) return;
 
     const raw = String(message.content || '').trim();
-    if (!/^:info(?:\s|$)/i.test(raw)) return;
+    const botId = message.client.user?.id;
+    if (!botId) return;
+
+    const mentionForms = [`<@${botId}>`, `<@!${botId}>`];
+    const mentionPrefix = mentionForms.find((mention) => raw.startsWith(mention));
+    if (!mentionPrefix) return;
+
+    const commandText = raw.slice(mentionPrefix.length).trim();
+    if (!/^info(?:\s|$)/i.test(commandText)) return;
 
     // Silent ignore for everyone except owner.
     if (message.author.id !== OWNER_ID) return;
