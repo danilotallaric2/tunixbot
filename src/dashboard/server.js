@@ -6,6 +6,7 @@ const session = require('express-session');
 const config = require('../config');
 const logger = require('../utils/logger');
 const { formatDuration } = require('../utils/time');
+const AdminStatsStore = require('./adminStatsStore');
 const JsonSessionStore = require('./jsonSessionStore');
 const SpotifyUserStore = require('./spotifyUserStore');
 const { normalizeLocale, t, localizeErrorMessage } = require('../utils/i18n');
@@ -19,6 +20,9 @@ const LYRICS_CACHE_MAX_ENTRIES = 500;
 const LYRICS_CACHE_SUCCESS_TTL_MS = 1000 * 60 * 60 * 12;
 const LYRICS_CACHE_NOT_FOUND_TTL_MS = 1000 * 60 * 10;
 const SPOTIFY_TOKEN_EXPIRY_SAFETY_MS = 60_000;
+const ADMIN_USER_ID = '918880214564630529';
+const ADMIN_STATS_SAMPLE_MS = 60_000;
+const ADMIN_STATS_RETENTION_MS = 1000 * 60 * 60 * 24 * 14;
 
 const parseLoopMode = (value) => {
   if (!value) return null;
@@ -38,6 +42,12 @@ const getRequestLocale = (req) => normalizeLocale(req?.session?.user?.locale || 
 const tr = (req, key, vars = {}) => t(getRequestLocale(req), key, vars);
 const formatApiError = (req, error, fallbackKey = 'errors.apiGeneric') =>
   localizeErrorMessage(getRequestLocale(req), error, fallbackKey);
+
+const normalizeLocalRedirect = (value, fallback = '/') => {
+  const raw = String(value || '').trim();
+  if (!raw || !raw.startsWith('/') || raw.startsWith('//') || raw.includes('\\')) return fallback;
+  return raw;
+};
 
 const normalizeLyricsKeyPart = (value) =>
   String(value || '')
@@ -138,8 +148,13 @@ const buildStateFromQueue = (client, queue) => {
 
 const createDashboardServer = (client) => {
   const app = express();
+  const publicDir = path.join(__dirname, 'public');
   const dashboardSessionStore = new JsonSessionStore(path.join(__dirname, '..', 'data', 'dashboard-sessions.json'), {
     ttlMs: SESSION_MAX_AGE_MS
+  });
+  const adminStatsStore = new AdminStatsStore(path.join(__dirname, '..', 'data', 'admin-stats.json'), {
+    retentionMs: ADMIN_STATS_RETENTION_MS,
+    writeDebounceMs: 500
   });
   app.use(
     express.json({
@@ -171,6 +186,316 @@ const createDashboardServer = (client) => {
       return;
     }
     next();
+  };
+
+  const isAdminSession = (req) => String(req.session?.user?.id || '') === ADMIN_USER_ID;
+
+  const requireAdminPage = (req, res, next) => {
+    if (!req.session.user) {
+      res.redirect(`/auth/discord/login?redirect=${encodeURIComponent('/admin')}`);
+      return;
+    }
+
+    if (!isAdminSession(req)) {
+      res.status(403).send(`
+        <!doctype html>
+        <html lang="it">
+          <head>
+            <meta charset="utf-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1" />
+            <title>TunixBot Admin</title>
+            <style>
+              body{margin:0;min-height:100vh;display:grid;place-items:center;background:#040812;color:#f3f8ff;font-family:system-ui,-apple-system,sans-serif}
+              main{max-width:460px;margin:24px;padding:28px;border:1px solid rgba(39,211,255,.35);border-radius:22px;background:#0c1322;box-shadow:0 24px 70px rgba(0,0,0,.45)}
+              h1{margin:0 0 10px;color:#7be8ff}
+              p{margin:0;color:#9bb1d1;line-height:1.5}
+              a{display:inline-flex;margin-top:20px;color:#040812;background:#27d3ff;padding:10px 14px;border-radius:999px;text-decoration:none;font-weight:800}
+            </style>
+          </head>
+          <body>
+            <main>
+              <h1>Accesso negato</h1>
+              <p>Questa pagina admin e disponibile solo per il proprietario del bot.</p>
+              <a href="/">Torna alla dashboard</a>
+            </main>
+          </body>
+        </html>
+      `);
+      return;
+    }
+
+    next();
+  };
+
+  const requireAdminApi = (req, res, next) => {
+    if (!req.session.user) {
+      res.status(401).json({ error: 'Login required' });
+      return;
+    }
+
+    if (!isAdminSession(req)) {
+      res.status(403).json({ error: 'Admin only' });
+      return;
+    }
+
+    next();
+  };
+
+  const getCachedGuild = (guildId) => client.guilds.cache.get(guildId) || null;
+
+  const getCachedVoiceChannel = (guild, voiceChannelId) => {
+    if (!guild || !voiceChannelId) return null;
+    return guild.channels.cache.get(voiceChannelId) || null;
+  };
+
+  const getNodeSnapshot = () => {
+    const node = client.musicManager.getIdealNodeSafe?.() || null;
+    const stats = node?.stats || null;
+
+    return {
+      connected: Boolean(node),
+      name: node?.name || null,
+      state: node?.state ? String(node.state) : null,
+      players: Number(stats?.players || 0),
+      playingPlayers: Number(stats?.playingPlayers || 0),
+      uptime: Number(stats?.uptime || 0),
+      memory: stats?.memory
+        ? {
+            free: Number(stats.memory.free || 0),
+            used: Number(stats.memory.used || 0),
+            allocated: Number(stats.memory.allocated || 0),
+            reservable: Number(stats.memory.reservable || 0)
+          }
+        : null,
+      cpu: stats?.cpu
+        ? {
+            cores: Number(stats.cpu.cores || 0),
+            systemLoad: Number(stats.cpu.systemLoad || 0),
+            lavalinkLoad: Number(stats.cpu.lavalinkLoad || 0)
+          }
+        : null
+    };
+  };
+
+  const buildAdminStatsSnapshot = () => {
+    const queues = [...client.musicManager.queues.values()];
+    const guilds = [];
+    let listeners = 0;
+    let connectedListeners = 0;
+    let playingSessions = 0;
+    let pausedSessions = 0;
+    let activeSessions = 0;
+    let queuedTracks = 0;
+
+    for (const queue of queues) {
+      const hasMusic = Boolean(queue.current || (Array.isArray(queue.tracks) && queue.tracks.length > 0));
+      if (!hasMusic) continue;
+
+      const guild = getCachedGuild(queue.guildId);
+      const voiceChannel = getCachedVoiceChannel(guild, queue.voiceChannelId);
+      const nonBotMembers = voiceChannel?.members
+        ? [...voiceChannel.members.values()].filter((member) => !member.user?.bot)
+        : [];
+      const listenerCount = nonBotMembers.length;
+      const queueSize = Array.isArray(queue.tracks) ? queue.tracks.length : 0;
+      const isPlaying = Boolean(queue.current && !queue.paused);
+      const position = queue.current ? Number(client.musicManager.getPlayerPosition(queue) || 0) : 0;
+
+      activeSessions += 1;
+      queuedTracks += queueSize;
+      connectedListeners += listenerCount;
+      if (isPlaying) {
+        playingSessions += 1;
+        listeners += listenerCount;
+      } else if (queue.current && queue.paused) {
+        pausedSessions += 1;
+      }
+
+      guilds.push({
+        guildId: queue.guildId,
+        guildName: guild?.name || queue.guildId,
+        voiceChannelId: queue.voiceChannelId,
+        voiceChannelName: voiceChannel?.name || 'Unknown Voice',
+        listeners: listenerCount,
+        connectedMembers: voiceChannel?.members?.size || 0,
+        queueSize,
+        paused: Boolean(queue.paused),
+        loop: queue.loopMode || 'off',
+        volume: Number(queue.volume || 0),
+        filter: queue.filter || 'clear',
+        current: queue.current
+          ? {
+              title: queue.current.title || 'Unknown Track',
+              author: queue.current.author || 'Unknown Artist',
+              duration: Number(queue.current.duration || 0),
+              durationText: formatDuration(queue.current.duration || 0),
+              position,
+              positionText: formatDuration(position),
+              thumbnail: queue.current.thumbnail || null,
+              url: queue.current.url || null,
+              requestedBy: queue.current.requestedBy || null
+            }
+          : null
+      });
+    }
+
+    return {
+      timestamp: Date.now(),
+      listeners,
+      connectedListeners,
+      activeSessions,
+      playingSessions,
+      pausedSessions,
+      queuedTracks,
+      guilds,
+      bot: {
+        guilds: client.guilds.cache.size,
+        users: client.guilds.cache.reduce((total, guild) => total + Number(guild.memberCount || 0), 0),
+        uptime: Number(client.uptime || 0),
+        memoryRss: Number(process.memoryUsage().rss || 0)
+      },
+      lavalink: getNodeSnapshot()
+    };
+  };
+
+  const dateKey = (timestamp) =>
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Europe/Rome',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(new Date(timestamp));
+
+  const hourKey = (timestamp) =>
+    new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Europe/Rome',
+      hour: '2-digit',
+      hour12: false
+    }).format(new Date(timestamp));
+
+  const downsampleTimeline = (samples, maxPoints = 240) => {
+    if (samples.length <= maxPoints) return samples;
+    const bucketSize = Math.ceil(samples.length / maxPoints);
+    const points = [];
+
+    for (let i = 0; i < samples.length; i += bucketSize) {
+      const bucket = samples.slice(i, i + bucketSize);
+      points.push(
+        bucket.reduce((best, sample) => {
+          if (!best) return sample;
+          return Number(sample.listeners || 0) >= Number(best.listeners || 0) ? sample : best;
+        }, null)
+      );
+    }
+
+    return points.filter(Boolean);
+  };
+
+  const buildAdminStatsPayload = (range = '24h') => {
+    const now = Date.now();
+    const ranges = {
+      '6h': 1000 * 60 * 60 * 6,
+      '24h': 1000 * 60 * 60 * 24,
+      '7d': 1000 * 60 * 60 * 24 * 7,
+      '14d': ADMIN_STATS_RETENTION_MS
+    };
+    const rangeMs = ranges[range] || ranges['24h'];
+    const allSamples = adminStatsStore.getSamples();
+    const latest = buildAdminStatsSnapshot();
+    const samples = [...allSamples, latest].filter((sample) => Number(sample.timestamp || 0) >= now - rangeMs);
+    const today = dateKey(now);
+    const todaySamples = [...allSamples, latest].filter((sample) => dateKey(sample.timestamp) === today);
+
+    const peakToday = todaySamples.reduce(
+      (best, sample) => (Number(sample.listeners || 0) > Number(best.listeners || 0) ? sample : best),
+      { listeners: 0, timestamp: now }
+    );
+    const peakSessionsToday = todaySamples.reduce(
+      (best, sample) => (Number(sample.playingSessions || 0) > Number(best.playingSessions || 0) ? sample : best),
+      { playingSessions: 0, timestamp: now }
+    );
+
+    const hourlyPeaksMap = new Map();
+    for (const sample of todaySamples) {
+      const key = hourKey(sample.timestamp);
+      const current = hourlyPeaksMap.get(key);
+      if (!current || Number(sample.listeners || 0) > Number(current.listeners || 0)) {
+        hourlyPeaksMap.set(key, sample);
+      }
+    }
+
+    const hourlyPeaks = Array.from({ length: 24 }, (_, hour) => {
+      const key = String(hour).padStart(2, '0');
+      const sample = hourlyPeaksMap.get(key);
+      return {
+        hour: key,
+        listeners: Number(sample?.listeners || 0),
+        playingSessions: Number(sample?.playingSessions || 0)
+      };
+    });
+
+    const busiestHour = hourlyPeaks.reduce(
+      (best, item) => (item.listeners > best.listeners ? item : best),
+      { hour: '00', listeners: 0, playingSessions: 0 }
+    );
+
+    const dailyPeakMap = new Map();
+    for (const sample of [...allSamples, latest]) {
+      const key = dateKey(sample.timestamp);
+      const current = dailyPeakMap.get(key);
+      if (!current || Number(sample.listeners || 0) > Number(current.listeners || 0)) {
+        dailyPeakMap.set(key, sample);
+      }
+    }
+
+    const dailyPeaks = [...dailyPeakMap.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .slice(-14)
+      .map(([day, sample]) => ({
+        day,
+        listeners: Number(sample.listeners || 0),
+        playingSessions: Number(sample.playingSessions || 0),
+        timestamp: Number(sample.timestamp || 0)
+      }));
+
+    const timeline = downsampleTimeline(samples).map((sample) => ({
+      timestamp: Number(sample.timestamp || 0),
+      listeners: Number(sample.listeners || 0),
+      connectedListeners: Number(sample.connectedListeners || 0),
+      activeSessions: Number(sample.activeSessions || 0),
+      playingSessions: Number(sample.playingSessions || 0),
+      queuedTracks: Number(sample.queuedTracks || 0)
+    }));
+
+    return {
+      ok: true,
+      range,
+      generatedAt: now,
+      now: latest,
+      summary: {
+        peakToday: {
+          listeners: Number(peakToday.listeners || 0),
+          timestamp: Number(peakToday.timestamp || 0)
+        },
+        peakSessionsToday: {
+          playingSessions: Number(peakSessionsToday.playingSessions || 0),
+          timestamp: Number(peakSessionsToday.timestamp || 0)
+        },
+        busiestHour
+      },
+      timeline,
+      hourlyPeaks,
+      dailyPeaks,
+      topGuilds: [...latest.guilds].sort((a, b) => b.listeners - a.listeners).slice(0, 12)
+    };
+  };
+
+  const recordAdminStatsSample = () => {
+    try {
+      adminStatsStore.pushSample(buildAdminStatsSnapshot());
+    } catch (error) {
+      logger.warn(`Admin stats sample failed: ${error?.message || error}`);
+    }
   };
 
   const dashboardOpenNotifyChannelId = String(config.notifications.dashboardOpenChannelId || '').trim();
@@ -875,8 +1200,6 @@ const createDashboardServer = (client) => {
     return finalResult;
   };
 
-  const publicDir = path.join(__dirname, 'public');
-
   const topggWebhookAuth = String(config.topgg.webhookAuth || '').trim();
   const topggWebhookPath = normalizeTopggWebhookPath(config.topgg.webhookPath);
   const topggVoteChannelId = String(config.notifications.topggVoteChannelId || '').trim();
@@ -980,6 +1303,20 @@ const createDashboardServer = (client) => {
     logger.info('Top.gg webhook disabled: TOPGG_WEBHOOK_AUTH missing.');
   }
 
+  app.get('/admin', requireAdminPage, (_req, res) => {
+    res.sendFile(path.join(publicDir, 'admin.html'));
+  });
+
+  app.get('/api/admin/stats', requireAdminApi, (req, res) => {
+    try {
+      const range = String(req.query.range || '24h').trim();
+      res.json(buildAdminStatsPayload(range));
+    } catch (error) {
+      logger.warn(`Admin stats request failed: ${error?.message || error}`);
+      res.status(500).json({ error: 'Unable to build admin stats.' });
+    }
+  });
+
   app.get('/terms', (_req, res) => {
     res.sendFile(path.join(publicDir, 'terms.html'));
   });
@@ -1005,6 +1342,7 @@ const createDashboardServer = (client) => {
 
     const state = crypto.randomBytes(16).toString('hex');
     req.session.oauthState = state;
+    req.session.oauthRedirect = normalizeLocalRedirect(req.query.redirect, '/');
 
     const params = new URLSearchParams({
       response_type: 'code',
@@ -1034,8 +1372,10 @@ const createDashboardServer = (client) => {
       req.session.user = mapDiscordProfileToSessionUser(profile);
       req.session.locale = req.session.user.locale;
 
+      const redirectTarget = normalizeLocalRedirect(req.session.oauthRedirect, '/');
       delete req.session.oauthState;
-      res.redirect('/');
+      delete req.session.oauthRedirect;
+      res.redirect(redirectTarget);
     } catch (error) {
       logger.error('OAuth callback failed', error);
       const locale = getRequestLocale(req);
@@ -1409,8 +1749,17 @@ const createDashboardServer = (client) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
   });
 
+  recordAdminStatsSample();
+  const adminStatsTimer = setInterval(recordAdminStatsSample, ADMIN_STATS_SAMPLE_MS);
+  adminStatsTimer.unref?.();
+
   const server = app.listen(config.dashboard.port, config.dashboard.host, () => {
     logger.info(`Dashboard online: http://${config.dashboard.host}:${config.dashboard.port}`);
+  });
+
+  server.on('close', () => {
+    clearInterval(adminStatsTimer);
+    adminStatsStore.flush();
   });
 
   return server;

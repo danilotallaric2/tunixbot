@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TunixBot Admin</title>
+    <link rel="stylesheet" href="/admin.css" />
+  </head>
+  <body>
+    <div class="admin-shell">
+      <header class="admin-hero">
+        <div class="admin-brand">
+          <img src="/assets/logo.png" alt="TunixBot logo" />
+          <div>
+            <p class="eyebrow">Owner dashboard</p>
+            <h1>TunixBot Admin</h1>
+            <span id="lastUpdate">Caricamento statistiche...</span>
+          </div>
+        </div>
+
+        <div class="admin-actions">
+          <select id="rangeSelect" aria-label="Intervallo statistiche">
+            <option value="6h">Ultime 6 ore</option>
+            <option value="24h" selected>Ultime 24 ore</option>
+            <option value="7d">Ultimi 7 giorni</option>
+            <option value="14d">Ultimi 14 giorni</option>
+          </select>
+          <button id="refreshBtn" type="button">Aggiorna</button>
+          <a href="/">Dashboard</a>
+        </div>
+      </header>
+
+      <main>
+        <section class="stats-grid">
+          <article class="stat-card primary">
+            <span>Ascoltatori live</span>
+            <strong id="liveListeners">0</strong>
+            <small id="connectedListeners">0 utenti in vocali attive</small>
+          </article>
+          <article class="stat-card">
+            <span>Sessioni in play</span>
+            <strong id="playingSessions">0</strong>
+            <small id="activeSessions">0 sessioni totali</small>
+          </article>
+          <article class="stat-card">
+            <span>Brani in coda</span>
+            <strong id="queuedTracks">0</strong>
+            <small id="pausedSessions">0 sessioni in pausa</small>
+          </article>
+          <article class="stat-card">
+            <span>Picco di oggi</span>
+            <strong id="peakToday">0</strong>
+            <small id="peakTodayTime">-</small>
+          </article>
+          <article class="stat-card">
+            <span>Ora migliore</span>
+            <strong id="busiestHour">--:00</strong>
+            <small id="busiestHourValue">0 ascoltatori</small>
+          </article>
+          <article class="stat-card node-card">
+            <span>Nodo Lavalink</span>
+            <strong id="nodeStatus">Offline</strong>
+            <small id="nodeDetails">-</small>
+          </article>
+        </section>
+
+        <section class="layout-grid">
+          <article class="chart-card wide">
+            <div class="card-head">
+              <div>
+                <p class="eyebrow">Andamento</p>
+                <h2>Ascoltatori nel tempo</h2>
+              </div>
+              <span class="legend"><i class="cyan"></i> live <i class="blue"></i> connessi</span>
+            </div>
+            <canvas id="listenersChart"></canvas>
+          </article>
+
+          <article class="chart-card">
+            <div class="card-head">
+              <div>
+                <p class="eyebrow">Sessioni</p>
+                <h2>Player attivi</h2>
+              </div>
+              <span class="legend"><i class="cyan"></i> play <i class="blue"></i> totali</span>
+            </div>
+            <canvas id="sessionsChart"></canvas>
+          </article>
+
+          <article class="chart-card">
+            <div class="card-head">
+              <div>
+                <p class="eyebrow">Oggi</p>
+                <h2>Picchi per ora</h2>
+              </div>
+            </div>
+            <canvas id="hourlyChart"></canvas>
+          </article>
+
+          <article class="chart-card">
+            <div class="card-head">
+              <div>
+                <p class="eyebrow">Storico</p>
+                <h2>Picchi giornalieri</h2>
+              </div>
+            </div>
+            <canvas id="dailyChart"></canvas>
+          </article>
+        </section>
+
+        <section class="live-grid">
+          <article class="live-card">
+            <div class="card-head">
+              <div>
+                <p class="eyebrow">Live</p>
+                <h2>Server che stanno ascoltando</h2>
+              </div>
+              <span id="serverCount">0 server</span>
+            </div>
+            <div id="guildList" class="guild-list"></div>
+          </article>
+
+          <article class="live-card compact">
+            <div class="card-head">
+              <div>
+                <p class="eyebrow">Bot</p>
+                <h2>Sistema</h2>
+              </div>
+            </div>
+            <div class="system-list">
+              <div><span>Server bot</span><b id="botGuilds">0</b></div>
+              <div><span>Utenti stimati</span><b id="botUsers">0</b></div>
+              <div><span>Uptime bot</span><b id="botUptime">0m</b></div>
+              <div><span>RAM bot</span><b id="botMemory">0 MB</b></div>
+              <div><span>Player Lavalink</span><b id="nodePlayers">0</b></div>
+              <div><span>Load Lavalink</span><b id="nodeLoad">0%</b></div>
+            </div>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+    <script src="/admin.js"></script>
+  </body>
+</html>
