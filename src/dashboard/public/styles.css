@@ -1922,13 +1922,6 @@ input[type='range']::-moz-range-thumb {
   color: rgba(234, 244, 255, 0.76);
 }
 
-#lyricsPanel .lyrics-lines.waiting-for-first-line .lyric-line:not(.is-placeholder) {
-  opacity: 0;
-  filter: blur(10px);
-  transform: translateY(18px) scale(0.98);
-  pointer-events: none;
-}
-
 #lyricsPanel .lyrics-player {
   height: 100%;
   min-height: 0;

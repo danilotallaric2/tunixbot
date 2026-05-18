@@ -1121,14 +1121,12 @@ const renderLyricsLines = () => {
   if (!lyricsLines.length) {
     lyricsPauseSegments = [];
     activeLyricsPauseId = null;
-    lyricsLinesWrap.classList.remove('waiting-for-first-line');
     lyricsLinesWrap.innerHTML = `<div class=\"lyric-line is-placeholder\">${tr('errors.syncedLyricsUnavailable')}</div>`;
     return;
   }
 
   lyricsPauseSegments = buildLyricsPauseSegments(lyricsLines);
   activeLyricsPauseId = null;
-  lyricsLinesWrap.classList.toggle('waiting-for-first-line', activeLyricIndex < 0);
   const pauseBeforeIndex = new Map(lyricsPauseSegments.map((segment) => [segment.beforeIndex, segment]));
 
   lyricsLines.forEach((line, idx) => {
@@ -1270,8 +1268,6 @@ const updateLyricsProgress = () => {
   if (backwardBlocked) idx = activeLyricIndex;
 
   const activePause = updateLyricsPauseStates(currentMs);
-  const waitingForFirstLine = idx < 0 && currentMs < (lyricsLines[0]?.timeMs || 0);
-  lyricsLinesWrap.classList.toggle('waiting-for-first-line', waitingForFirstLine);
 
   const indexChanged = idx !== activeLyricIndex;
   const pauseChanged = activePause?.id !== activeLyricsPauseId;
@@ -1334,7 +1330,6 @@ const loadLyricsForCurrentTrack = async () => {
   lyricsLines = [];
   lyricsPauseSegments = [];
   activeLyricsPauseId = null;
-  lyricsLinesWrap.classList.remove('waiting-for-first-line');
   lyricsLinesWrap.innerHTML = `<div class=\"lyric-line is-placeholder\">${tr('status.loadingLyrics')}</div>`;
 
   const parsed = await fetchLyricsForTrackKey(requestTrackKey);
