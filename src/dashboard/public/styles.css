@@ -1697,9 +1697,9 @@ input[type='range']::-moz-range-thumb {
   border-radius: 26px;
   overflow: hidden;
   background:
-    linear-gradient(145deg, rgba(9, 16, 31, 0.62), rgba(7, 12, 24, 0.88)),
-    rgba(8, 14, 28, 0.98);
-  border-color: rgba(154, 213, 255, 0.3);
+    linear-gradient(145deg, rgba(10, 10, 14, 0.48), rgba(4, 4, 8, 0.8)),
+    rgba(7, 7, 11, 0.98);
+  border-color: rgba(255, 255, 255, 0.18);
 }
 
 #lyricsPanel .spicy-lyrics-card::before {
@@ -1707,13 +1707,11 @@ input[type='range']::-moz-range-thumb {
   position: absolute;
   inset: -18%;
   z-index: -2;
-  background-image:
-    radial-gradient(circle at 22% 12%, rgba(123, 232, 255, 0.2), transparent 42%),
-    var(--lyrics-cover-image);
+  background-image: var(--lyrics-cover-image);
   background-position: center;
   background-repeat: no-repeat;
   background-size: cover;
-  filter: blur(54px) saturate(1.8) brightness(0.46);
+  filter: blur(54px) saturate(2.15) brightness(0.58);
   transform: scale(1.18);
   animation: lyrics-ambient-drift 18s ease-in-out infinite alternate;
 }
@@ -1724,11 +1722,10 @@ input[type='range']::-moz-range-thumb {
   inset: 0;
   z-index: -1;
   background:
-    radial-gradient(circle at 18% 8%, rgba(39, 211, 255, 0.24), transparent 36%),
-    radial-gradient(circle at 18% 100%, rgba(39, 211, 255, 0.22), transparent 42%),
-    radial-gradient(circle at 84% 92%, rgba(35, 99, 215, 0.22), transparent 36%),
-    linear-gradient(180deg, rgba(5, 10, 21, 0.28), rgba(5, 10, 21, 0.72)),
-    linear-gradient(90deg, rgba(5, 10, 21, 0.42), rgba(5, 10, 21, 0.82));
+    radial-gradient(circle at 18% 8%, rgba(255, 255, 255, 0.12), transparent 34%),
+    radial-gradient(circle at 82% 88%, rgba(255, 255, 255, 0.08), transparent 34%),
+    linear-gradient(180deg, rgba(0, 0, 0, 0.16), rgba(0, 0, 0, 0.66)),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.22), rgba(0, 0, 0, 0.72));
   pointer-events: none;
 }
 
@@ -1779,7 +1776,7 @@ input[type='range']::-moz-range-thumb {
   overflow: auto;
   border: 0;
   border-radius: 22px;
-  background: rgba(5, 11, 24, 0.24);
+  background: rgba(0, 0, 0, 0.14);
   padding: 0 18px;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.35) transparent;
@@ -1840,7 +1837,7 @@ input[type='range']::-moz-range-thumb {
   height: clamp(12px, 1.3vw, 18px);
   border-radius: 999px;
   background: rgba(221, 238, 255, 0.95);
-  box-shadow: 0 0 0 rgba(123, 232, 255, 0);
+  box-shadow: 0 0 0 rgba(255, 255, 255, 0);
   opacity: 0.22;
   transform: scale(0.72) translateY(0);
   transition:
@@ -1859,7 +1856,7 @@ input[type='range']::-moz-range-thumb {
   animation: lyrics-pause-dot-pulse 900ms ease-in-out infinite alternate;
   box-shadow:
     0 0 14px rgba(255, 255, 255, 0.3),
-    0 0 32px rgba(123, 232, 255, 0.32);
+    0 0 32px rgba(255, 255, 255, 0.24);
 }
 
 @keyframes lyrics-pause-dot-pulse {
@@ -1910,7 +1907,7 @@ input[type='range']::-moz-range-thumb {
   transform: scale(1);
   text-shadow:
     0 0 10px rgba(255, 255, 255, 0.18),
-    0 0 28px rgba(123, 232, 255, 0.2);
+    0 0 28px rgba(255, 255, 255, 0.16);
 }
 
 #lyricsPanel .lyric-line:hover {
@@ -1937,8 +1934,8 @@ input[type='range']::-moz-range-thumb {
   min-height: 0;
   overflow: auto;
   border-radius: 22px;
-  border-color: rgba(173, 220, 255, 0.25);
-  background: rgba(5, 11, 24, 0.48);
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(0, 0, 0, 0.28);
   backdrop-filter: blur(16px);
 }
 
