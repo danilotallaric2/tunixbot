@@ -108,6 +108,8 @@ const ANNOUNCEMENT_VERSION = '1.0.5';
 const ANNOUNCEMENT_COOKIE = 'tunixbot_announcement_dismissed';
 // Positive value delays lyrics, negative value anticipates lyrics.
 const LYRICS_SYNC_DELAY_MS = 0;
+const LYRICS_PAUSE_MIN_DURATION_MS = 3000;
+const LYRICS_PAUSE_MIN_GAP_MS = 5400;
 const SERVER_PROGRESS_BACKWARD_TOLERANCE_MS = 350;
 const SERVER_PROGRESS_HARD_RESET_BACKWARD_MS = 3500;
 const SERVER_PROGRESS_SOFT_SYNC_DEADZONE_MS = 120;
@@ -126,8 +128,10 @@ let progressAnchorTs = 0;
 let progressTrackKey = null;
 let lyricsOpen = false;
 let lyricsLines = [];
+let lyricsPauseSegments = [];
 let lyricsTrackKey = null;
 let activeLyricIndex = -1;
+let activeLyricsPauseId = null;
 let lyricsRequestSeq = 0;
 let lyricsBackwardSyncUntilTs = 0;
 let pendingHardBackwardSync = null;
@@ -1047,15 +1051,90 @@ const prefetchLyricsForCurrentTrack = () => {
   fetchLyricsForTrackKey(trackKey).catch(() => {});
 };
 
+const estimateLyricsVocalDurationMs = (line, gapMs) => {
+  const text = String(line?.text || '').trim();
+  const words = text ? text.split(/\s+/).length : 0;
+  const letters = text.replace(/[^\p{L}\p{N}]/gu, '').length;
+  const estimatedMs = Math.max(1500, words * 430, letters * 72);
+  const latestSafeStartMs = Math.max(0, gapMs - LYRICS_PAUSE_MIN_DURATION_MS);
+  return Math.min(Math.max(1500, estimatedMs), latestSafeStartMs);
+};
+
+const buildLyricsPauseSegments = (lines) => {
+  if (!Array.isArray(lines) || !lines.length) return [];
+
+  const segments = [];
+  const firstLineStartMs = Math.max(0, Number(lines[0]?.timeMs || 0));
+  if (firstLineStartMs >= LYRICS_PAUSE_MIN_DURATION_MS) {
+    segments.push({
+      id: 'intro',
+      startMs: 0,
+      endMs: firstLineStartMs,
+      beforeIndex: 0,
+      afterIndex: -1
+    });
+  }
+
+  for (let idx = 0; idx < lines.length - 1; idx += 1) {
+    const current = lines[idx];
+    const next = lines[idx + 1];
+    const gapMs = Math.max(0, Number(next.timeMs || 0) - Number(current.timeMs || 0));
+    if (gapMs < LYRICS_PAUSE_MIN_GAP_MS) continue;
+
+    const vocalDurationMs = estimateLyricsVocalDurationMs(current, gapMs);
+    const startMs = Number(current.timeMs || 0) + vocalDurationMs;
+    const endMs = Number(next.timeMs || 0);
+    if (endMs - startMs < LYRICS_PAUSE_MIN_DURATION_MS) continue;
+
+    segments.push({
+      id: `gap-${idx}`,
+      startMs,
+      endMs,
+      beforeIndex: idx + 1,
+      afterIndex: idx
+    });
+  }
+
+  return segments;
+};
+
+const createLyricsPauseLine = (segment) => {
+  const lineEl = document.createElement('div');
+  lineEl.className = 'lyrics-pause-line';
+  lineEl.dataset.pauseId = segment.id;
+  lineEl.dataset.startMs = String(segment.startMs);
+  lineEl.dataset.endMs = String(segment.endMs);
+
+  for (let idx = 0; idx < 3; idx += 1) {
+    const dot = document.createElement('span');
+    dot.className = 'lyrics-pause-dot upcoming';
+    dot.dataset.dotIndex = String(idx);
+    lineEl.appendChild(dot);
+  }
+
+  return lineEl;
+};
+
 const renderLyricsLines = () => {
   lyricsLinesWrap.innerHTML = '';
 
   if (!lyricsLines.length) {
+    lyricsPauseSegments = [];
+    activeLyricsPauseId = null;
+    lyricsLinesWrap.classList.remove('waiting-for-first-line');
     lyricsLinesWrap.innerHTML = `<div class=\"lyric-line is-placeholder\">${tr('errors.syncedLyricsUnavailable')}</div>`;
     return;
   }
 
+  lyricsPauseSegments = buildLyricsPauseSegments(lyricsLines);
+  activeLyricsPauseId = null;
+  lyricsLinesWrap.classList.toggle('waiting-for-first-line', activeLyricIndex < 0);
+  const pauseBeforeIndex = new Map(lyricsPauseSegments.map((segment) => [segment.beforeIndex, segment]));
+
   lyricsLines.forEach((line, idx) => {
+    const pauseSegment = pauseBeforeIndex.get(idx);
+    if (pauseSegment) lyricsLinesWrap.appendChild(createLyricsPauseLine(pauseSegment));
+
     const el = document.createElement('div');
     el.className = 'lyric-line upcoming';
     el.dataset.index = String(idx);
@@ -1083,13 +1162,24 @@ const setEffectsOpen = (open) => {
   else effectsPanel.classList.add('hidden');
 };
 
-const updateLyricLineStates = (idx) => {
+const updateLyricLineStates = (idx, activePause = null) => {
   const lineEls = lyricsLinesWrap.querySelectorAll('.lyric-line');
+  const pausedAfterIndex = activePause?.afterIndex ?? null;
 
   lineEls.forEach((el, i) => {
     const distance = idx < 0 ? Math.min(i + 1, 8) : Math.min(Math.abs(i - idx), 8);
     el.style.setProperty('--line-distance', String(distance));
     el.classList.remove('active', 'sung', 'upcoming', 'dimmed');
+
+    if (activePause) {
+      if (i <= pausedAfterIndex) {
+        el.classList.add('sung');
+        return;
+      }
+
+      el.classList.add('upcoming');
+      return;
+    }
 
     if (i < idx) {
       el.classList.add('sung');
@@ -1105,11 +1195,8 @@ const updateLyricLineStates = (idx) => {
   });
 };
 
-const scrollActiveLyricIntoFocus = (idx) => {
-  if (idx < 0) return;
-  const activeEl = lyricsLinesWrap.querySelector(`.lyric-line[data-index=\"${idx}\"]`);
+const scrollLyricsElementIntoFocus = (activeEl) => {
   if (!activeEl) return;
-
   const bodyRect = lyricsBody.getBoundingClientRect();
   const lineRect = activeEl.getBoundingClientRect();
   const topSafe = bodyRect.top + bodyRect.height * 0.34;
@@ -1125,6 +1212,44 @@ const scrollActiveLyricIntoFocus = (idx) => {
   }
 };
 
+const scrollActiveLyricIntoFocus = (idx) => {
+  if (idx < 0) return;
+  scrollLyricsElementIntoFocus(lyricsLinesWrap.querySelector(`.lyric-line[data-index=\"${idx}\"]`));
+};
+
+const getActiveLyricsPause = (currentMs) =>
+  lyricsPauseSegments.find((segment) => currentMs >= segment.startMs && currentMs < segment.endMs) || null;
+
+const updateLyricsPauseStates = (currentMs) => {
+  const activePause = getActiveLyricsPause(currentMs);
+
+  lyricsLinesWrap.querySelectorAll('.lyrics-pause-line').forEach((lineEl) => {
+    const pauseId = lineEl.dataset.pauseId;
+    const segment = lyricsPauseSegments.find((item) => item.id === pauseId);
+    const isActive = Boolean(segment && segment.id === activePause?.id);
+    lineEl.classList.toggle('active', isActive);
+
+    if (!segment) return;
+
+    const segmentDurationMs = Math.max(1, segment.endMs - segment.startMs);
+    const segmentElapsedMs = Math.max(0, Math.min(segmentDurationMs, currentMs - segment.startMs));
+    const activeDotIndex = Math.min(2, Math.floor((segmentElapsedMs / segmentDurationMs) * 3));
+
+    lineEl.querySelectorAll('.lyrics-pause-dot').forEach((dotEl, dotIndex) => {
+      dotEl.classList.remove('sung', 'active', 'upcoming');
+      if (!isActive || dotIndex > activeDotIndex) {
+        dotEl.classList.add('upcoming');
+      } else if (dotIndex < activeDotIndex) {
+        dotEl.classList.add('sung');
+      } else {
+        dotEl.classList.add('active');
+      }
+    });
+  });
+
+  return activePause;
+};
+
 const updateLyricsProgress = () => {
   if (!lyricsOpen || !lyricsLines.length || !state?.current) return;
 
@@ -1138,20 +1263,24 @@ const updateLyricsProgress = () => {
   const backwardBlocked = idx < activeLyricIndex && Date.now() > lyricsBackwardSyncUntilTs;
   if (backwardBlocked) idx = activeLyricIndex;
 
-  const indexChanged = idx !== activeLyricIndex;
-  if (indexChanged) {
-    activeLyricIndex = idx;
-    updateLyricLineStates(idx);
-    scrollActiveLyricIntoFocus(idx);
-  }
+  const activePause = updateLyricsPauseStates(currentMs);
+  const waitingForFirstLine = idx < 0 && currentMs < (lyricsLines[0]?.timeMs || 0);
+  lyricsLinesWrap.classList.toggle('waiting-for-first-line', waitingForFirstLine);
 
-  if (idx >= 0) {
-    const activeEl = lyricsLinesWrap.querySelector(`.lyric-line[data-index=\"${idx}\"]`);
-    const startMs = lyricsLines[idx]?.timeMs || 0;
-    const nextStartMs = lyricsLines[idx + 1]?.timeMs || state.current.duration || startMs + 2400;
-    const lineDurationMs = Math.max(650, nextStartMs - startMs);
-    const lineProgress = Math.max(0, Math.min(1, (currentMs - startMs) / lineDurationMs));
-    activeEl?.style.setProperty('--line-progress', `${Math.round(lineProgress * 1000) / 10}%`);
+  const indexChanged = idx !== activeLyricIndex;
+  const pauseChanged = activePause?.id !== activeLyricsPauseId;
+  if (indexChanged || pauseChanged) {
+    activeLyricIndex = idx;
+    activeLyricsPauseId = activePause?.id || null;
+    updateLyricLineStates(idx, activePause);
+
+    if (activePause) {
+      scrollLyricsElementIntoFocus(
+        lyricsLinesWrap.querySelector(`.lyrics-pause-line[data-pause-id=\"${activePause.id}\"]`)
+      );
+    } else {
+      scrollActiveLyricIntoFocus(idx);
+    }
   }
 };
 
@@ -1197,6 +1326,9 @@ const loadLyricsForCurrentTrack = async () => {
   }
 
   lyricsLines = [];
+  lyricsPauseSegments = [];
+  activeLyricsPauseId = null;
+  lyricsLinesWrap.classList.remove('waiting-for-first-line');
   lyricsLinesWrap.innerHTML = `<div class=\"lyric-line is-placeholder\">${tr('status.loadingLyrics')}</div>`;
 
   const parsed = await fetchLyricsForTrackKey(requestTrackKey);
