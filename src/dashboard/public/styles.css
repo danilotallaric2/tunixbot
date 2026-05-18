@@ -1690,9 +1690,10 @@ input[type='range']::-moz-range-thumb {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   width: min(1320px, calc(100vw - 40px));
-  height: min(860px, calc(100svh - 40px));
-  min-height: min(640px, calc(100svh - 40px));
+  height: min(820px, calc(100svh - 72px));
+  min-height: min(620px, calc(100svh - 72px));
   max-height: calc(100svh - 40px);
+  padding: clamp(20px, 2vw, 28px);
   border-radius: 26px;
   overflow: hidden;
   background:
@@ -1723,8 +1724,10 @@ input[type='range']::-moz-range-thumb {
   inset: 0;
   z-index: -1;
   background:
-    radial-gradient(circle at 18% 8%, rgba(39, 211, 255, 0.18), transparent 34%),
+    radial-gradient(circle at 18% 8%, rgba(39, 211, 255, 0.24), transparent 36%),
+    radial-gradient(circle at 18% 100%, rgba(39, 211, 255, 0.22), transparent 42%),
     radial-gradient(circle at 84% 92%, rgba(35, 99, 215, 0.22), transparent 36%),
+    linear-gradient(180deg, rgba(5, 10, 21, 0.28), rgba(5, 10, 21, 0.72)),
     linear-gradient(90deg, rgba(5, 10, 21, 0.42), rgba(5, 10, 21, 0.82));
   pointer-events: none;
 }
@@ -1781,19 +1784,19 @@ input[type='range']::-moz-range-thumb {
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.35) transparent;
   scroll-behavior: smooth;
-  scroll-padding-block: 28vh;
+  scroll-padding-block: 22vh;
   -webkit-mask-image: linear-gradient(
     180deg,
-    transparent 0,
-    #000 11%,
-    #000 89%,
+    #000 0,
+    #000 8%,
+    #000 88%,
     transparent 100%
   );
   mask-image: linear-gradient(
     180deg,
-    transparent 0,
-    #000 11%,
-    #000 89%,
+    #000 0,
+    #000 8%,
+    #000 88%,
     transparent 100%
   );
 }
@@ -1801,7 +1804,7 @@ input[type='range']::-moz-range-thumb {
 #lyricsPanel .lyrics-lines {
   display: block;
   min-height: 100%;
-  padding: clamp(80px, 22vh, 180px) 0 clamp(140px, 32vh, 260px);
+  padding: clamp(48px, 12vh, 96px) 0 clamp(120px, 26vh, 220px);
 }
 
 #lyricsPanel .lyrics-pause-line {
