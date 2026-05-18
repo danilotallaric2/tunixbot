@@ -109,7 +109,6 @@ const ANNOUNCEMENT_COOKIE = 'tunixbot_announcement_dismissed';
 // Positive value delays lyrics, negative value anticipates lyrics.
 const LYRICS_SYNC_DELAY_MS = 0;
 const LYRICS_PAUSE_MIN_DURATION_MS = 3000;
-const LYRICS_PAUSE_MIN_GAP_MS = 5400;
 const SERVER_PROGRESS_BACKWARD_TOLERANCE_MS = 350;
 const SERVER_PROGRESS_HARD_RESET_BACKWARD_MS = 3500;
 const SERVER_PROGRESS_SOFT_SYNC_DEADZONE_MS = 120;
@@ -1051,13 +1050,11 @@ const prefetchLyricsForCurrentTrack = () => {
   fetchLyricsForTrackKey(trackKey).catch(() => {});
 };
 
-const estimateLyricsVocalDurationMs = (line, gapMs) => {
+const estimateLyricsVocalDurationMs = (line) => {
   const text = String(line?.text || '').trim();
   const words = text ? text.split(/\s+/).length : 0;
   const letters = text.replace(/[^\p{L}\p{N}]/gu, '').length;
-  const estimatedMs = Math.max(1500, words * 430, letters * 72);
-  const latestSafeStartMs = Math.max(0, gapMs - LYRICS_PAUSE_MIN_DURATION_MS);
-  return Math.min(Math.max(1500, estimatedMs), latestSafeStartMs);
+  return Math.max(1500, words * 430, letters * 72);
 };
 
 const buildLyricsPauseSegments = (lines) => {
@@ -1079,12 +1076,12 @@ const buildLyricsPauseSegments = (lines) => {
     const current = lines[idx];
     const next = lines[idx + 1];
     const gapMs = Math.max(0, Number(next.timeMs || 0) - Number(current.timeMs || 0));
-    if (gapMs < LYRICS_PAUSE_MIN_GAP_MS) continue;
+    const vocalDurationMs = estimateLyricsVocalDurationMs(current);
+    const pauseDurationMs = gapMs - vocalDurationMs;
+    if (pauseDurationMs < LYRICS_PAUSE_MIN_DURATION_MS) continue;
 
-    const vocalDurationMs = estimateLyricsVocalDurationMs(current, gapMs);
     const startMs = Number(current.timeMs || 0) + vocalDurationMs;
     const endMs = Number(next.timeMs || 0);
-    if (endMs - startMs < LYRICS_PAUSE_MIN_DURATION_MS) continue;
 
     segments.push({
       id: `gap-${idx}`,
