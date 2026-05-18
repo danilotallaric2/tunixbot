@@ -1051,14 +1051,16 @@ const renderLyricsLines = () => {
   lyricsLinesWrap.innerHTML = '';
 
   if (!lyricsLines.length) {
-    lyricsLinesWrap.innerHTML = `<div class=\"lyric-line\">${tr('errors.syncedLyricsUnavailable')}</div>`;
+    lyricsLinesWrap.innerHTML = `<div class=\"lyric-line is-placeholder\">${tr('errors.syncedLyricsUnavailable')}</div>`;
     return;
   }
 
   lyricsLines.forEach((line, idx) => {
     const el = document.createElement('div');
-    el.className = 'lyric-line';
+    el.className = 'lyric-line upcoming';
     el.dataset.index = String(idx);
+    el.dataset.timeMs = String(line.timeMs);
+    el.style.setProperty('--line-distance', '6');
     el.textContent = line.text;
     lyricsLinesWrap.appendChild(el);
   });
@@ -1070,9 +1072,57 @@ const setLyricsOpen = (open) => {
   else lyricsPanel.classList.add('hidden');
 };
 
+const setLyricsAmbientCover = (coverUrl) => {
+  const safeCoverUrl = String(coverUrl || '').replace(/["\\]/g, '\\$&');
+  lyricsPanel.style.setProperty('--lyrics-cover-image', safeCoverUrl ? `url("${safeCoverUrl}")` : 'none');
+  lyricsPanel.classList.toggle('has-cover', Boolean(safeCoverUrl));
+};
+
 const setEffectsOpen = (open) => {
   if (open) effectsPanel.classList.remove('hidden');
   else effectsPanel.classList.add('hidden');
+};
+
+const updateLyricLineStates = (idx) => {
+  const lineEls = lyricsLinesWrap.querySelectorAll('.lyric-line');
+
+  lineEls.forEach((el, i) => {
+    const distance = idx < 0 ? Math.min(i + 1, 8) : Math.min(Math.abs(i - idx), 8);
+    el.style.setProperty('--line-distance', String(distance));
+    el.classList.remove('active', 'sung', 'upcoming', 'dimmed');
+
+    if (i < idx) {
+      el.classList.add('sung');
+      return;
+    }
+
+    if (i === idx) {
+      el.classList.add('active');
+      return;
+    }
+
+    el.classList.add('upcoming');
+  });
+};
+
+const scrollActiveLyricIntoFocus = (idx) => {
+  if (idx < 0) return;
+  const activeEl = lyricsLinesWrap.querySelector(`.lyric-line[data-index=\"${idx}\"]`);
+  if (!activeEl) return;
+
+  const bodyRect = lyricsBody.getBoundingClientRect();
+  const lineRect = activeEl.getBoundingClientRect();
+  const topSafe = bodyRect.top + bodyRect.height * 0.34;
+  const bottomSafe = bodyRect.top + bodyRect.height * 0.66;
+  const outOfSafeZone = lineRect.top < topSafe || lineRect.bottom > bottomSafe;
+
+  if (outOfSafeZone) {
+    const prefersReducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+    activeEl.scrollIntoView({
+      behavior: prefersReducedMotion ? 'auto' : 'smooth',
+      block: 'center'
+    });
+  }
 };
 
 const updateLyricsProgress = () => {
@@ -1091,27 +1141,18 @@ const updateLyricsProgress = () => {
   const indexChanged = idx !== activeLyricIndex;
   if (indexChanged) {
     activeLyricIndex = idx;
-
-    const lineEls = lyricsLinesWrap.querySelectorAll('.lyric-line');
-    lineEls.forEach((el, i) => {
-      el.classList.remove('active', 'dimmed');
-      if (idx >= 0 && i < idx) el.classList.add('dimmed');
-      if (i === idx) el.classList.add('active');
-    });
-
-    if (idx >= 0) {
-      const activeEl = lyricsLinesWrap.querySelector(`.lyric-line[data-index=\"${idx}\"]`);
-      if (activeEl) {
-        const bodyRect = lyricsBody.getBoundingClientRect();
-        const lineRect = activeEl.getBoundingClientRect();
-        const topSafe = bodyRect.top + bodyRect.height * 0.3;
-        const bottomSafe = bodyRect.top + bodyRect.height * 0.7;
-        const outOfSafeZone = lineRect.top < topSafe || lineRect.bottom > bottomSafe;
-        if (outOfSafeZone) activeEl.scrollIntoView({ behavior: 'auto', block: 'center' });
-      }
-    }
+    updateLyricLineStates(idx);
+    scrollActiveLyricIntoFocus(idx);
   }
 
+  if (idx >= 0) {
+    const activeEl = lyricsLinesWrap.querySelector(`.lyric-line[data-index=\"${idx}\"]`);
+    const startMs = lyricsLines[idx]?.timeMs || 0;
+    const nextStartMs = lyricsLines[idx + 1]?.timeMs || state.current.duration || startMs + 2400;
+    const lineDurationMs = Math.max(650, nextStartMs - startMs);
+    const lineProgress = Math.max(0, Math.min(1, (currentMs - startMs) / lineDurationMs));
+    activeEl?.style.setProperty('--line-progress', `${Math.round(lineProgress * 1000) / 10}%`);
+  }
 };
 
 const updateLoopButtonLabels = () => {
@@ -1156,7 +1197,7 @@ const loadLyricsForCurrentTrack = async () => {
   }
 
   lyricsLines = [];
-  lyricsLinesWrap.innerHTML = `<div class=\"lyric-line\">${tr('status.loadingLyrics')}</div>`;
+  lyricsLinesWrap.innerHTML = `<div class=\"lyric-line is-placeholder\">${tr('status.loadingLyrics')}</div>`;
 
   const parsed = await fetchLyricsForTrackKey(requestTrackKey);
   if (requestSeq !== lyricsRequestSeq) return;
@@ -1563,6 +1604,7 @@ const renderNowPlaying = (s) => {
     npThumb.src = '';
     npTitle.textContent = tr('ui.noTrack');
     npArtist.textContent = '-';
+    setLyricsAmbientCover(null);
     lyricsNpThumb.src = '';
     lyricsNpTitle.textContent = tr('ui.noTrack');
     lyricsNpArtist.textContent = '-';
@@ -1578,6 +1620,7 @@ const renderNowPlaying = (s) => {
     npThumb.src = s.current.thumbnail || '';
     npTitle.textContent = s.current.title;
     npArtist.textContent = s.current.author;
+    setLyricsAmbientCover(s.current.thumbnail || '');
     lyricsNpThumb.src = s.current.thumbnail || '';
     lyricsNpTitle.textContent = s.current.title;
     lyricsNpArtist.textContent = s.current.author;
@@ -1888,6 +1931,23 @@ lyricsBtn.addEventListener('click', async () => {
 lyricsCloseBtn.addEventListener('click', () => setLyricsOpen(false));
 lyricsPanel.addEventListener('click', (e) => {
   if (e.target === lyricsPanel) setLyricsOpen(false);
+});
+
+lyricsLinesWrap.addEventListener('click', (e) => {
+  const lineEl = e.target.closest?.('.lyric-line[data-time-ms]');
+  if (!lineEl || !state?.current) return;
+
+  try {
+    ensureCanControl();
+    const targetMs = Math.max(0, Number(lineEl.dataset.timeMs || 0));
+    progressAnchorMs = targetMs;
+    progressAnchorTs = Date.now();
+    markLyricsBackwardSyncWindow(3000);
+    renderProgressOnly();
+    control('seek', targetMs);
+  } catch (error) {
+    setStatus(error.message, true);
+  }
 });
 
 effectsBtn.addEventListener('click', () => {
