@@ -1689,7 +1689,7 @@ input[type='range']::-moz-range-thumb {
   isolation: isolate;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  width: min(1320px, calc(100vw - 40px));
+  width: min(1480px, calc(100vw - 40px));
   height: min(820px, calc(100svh - 72px));
   min-height: min(620px, calc(100svh - 72px));
   max-height: calc(100svh - 40px);

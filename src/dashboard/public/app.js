@@ -1205,9 +1205,15 @@ const scrollLyricsElementIntoFocus = (activeEl) => {
 
   if (outOfSafeZone) {
     const prefersReducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
-    activeEl.scrollIntoView({
-      behavior: prefersReducedMotion ? 'auto' : 'smooth',
-      block: 'center'
+    const targetScrollTop =
+      lyricsBody.scrollTop +
+      (lineRect.top - bodyRect.top) -
+      (bodyRect.height - lineRect.height) / 2;
+
+    // Keep the modal fixed; only the lyrics viewport itself should move.
+    lyricsBody.scrollTo({
+      top: Math.max(0, targetScrollTop),
+      behavior: prefersReducedMotion ? 'auto' : 'smooth'
     });
   }
 };
