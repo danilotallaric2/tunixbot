@@ -1708,6 +1708,8 @@ input[type='range']::-moz-range-thumb {
   height: 100%;
   opacity: 0.98;
   pointer-events: none;
+  contain: paint;
+  transform: translateZ(0);
 }
 
 #lyricsPanel .spicy-lyrics-card::before,

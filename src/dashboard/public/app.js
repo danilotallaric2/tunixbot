@@ -110,6 +110,22 @@ const ANNOUNCEMENT_COOKIE = 'tunixbot_announcement_dismissed';
 // Positive value delays lyrics, negative value anticipates lyrics.
 const LYRICS_SYNC_DELAY_MS = 0;
 const LYRICS_PAUSE_MIN_DURATION_MS = 3000;
+const isFirefoxEngine = /\b(Firefox|FxiOS)\//.test(navigator.userAgent || '');
+const lyricsDynamicBgProfile = {
+  maxPixelRatio: isFirefoxEngine ? 0.85 : 2,
+  frameIntervalMs: isFirefoxEngine ? 1000 / 30 : 0,
+  primaryBlur: isFirefoxEngine ? 24 : 42,
+  secondaryBlur: isFirefoxEngine ? 10 : 18,
+  screenBlur: isFirefoxEngine ? 30 : 70,
+  primarySaturation: isFirefoxEngine ? 1.9 : 2.55,
+  secondarySaturation: isFirefoxEngine ? 1.55 : 2.1,
+  screenSaturation: isFirefoxEngine ? 1.8 : 3,
+  primaryBrightness: isFirefoxEngine ? 0.58 : 0.62,
+  secondaryBrightness: isFirefoxEngine ? 0.72 : 0.82,
+  screenBrightness: isFirefoxEngine ? 0.66 : 0.78,
+  screenAlpha: isFirefoxEngine ? 0.07 : 0.12,
+  secondaryAlpha: isFirefoxEngine ? 0.14 : 0.2
+};
 const SERVER_PROGRESS_BACKWARD_TOLERANCE_MS = 350;
 const SERVER_PROGRESS_HARD_RESET_BACKWARD_MS = 3500;
 const SERVER_PROGRESS_SOFT_SYNC_DEADZONE_MS = 120;
@@ -147,6 +163,7 @@ const lyricsDynamicBgState = {
   coverUrl: '',
   image: null,
   rafId: null,
+  lastFrameAt: 0,
   startedAt: 0,
   reducedMotion: window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches || false
 };
@@ -1161,7 +1178,7 @@ const resizeLyricsDynamicBackground = () => {
   if (!lyricsDynamicBg) return { width: 0, height: 0, ratio: 1 };
 
   const rect = lyricsDynamicBg.getBoundingClientRect();
-  const ratio = Math.min(window.devicePixelRatio || 1, 2);
+  const ratio = Math.max(0.7, Math.min(window.devicePixelRatio || 1, lyricsDynamicBgProfile.maxPixelRatio));
   const width = Math.max(1, Math.round(rect.width * ratio));
   const height = Math.max(1, Math.round(rect.height * ratio));
 
@@ -1201,6 +1218,15 @@ const drawLyricsDynamicBackground = (timestamp = performance.now()) => {
   const ctx = lyricsDynamicBg.getContext('2d');
   if (!ctx) return;
 
+  if (!lyricsDynamicBgState.reducedMotion && lyricsDynamicBgProfile.frameIntervalMs) {
+    const msSinceLastFrame = timestamp - lyricsDynamicBgState.lastFrameAt;
+    if (lyricsDynamicBgState.lastFrameAt && msSinceLastFrame < lyricsDynamicBgProfile.frameIntervalMs) {
+      lyricsDynamicBgState.rafId = requestAnimationFrame(drawLyricsDynamicBackground);
+      return;
+    }
+    lyricsDynamicBgState.lastFrameAt = timestamp;
+  }
+
   const { width, height } = resizeLyricsDynamicBackground();
   if (!width || !height) return;
 
@@ -1222,7 +1248,7 @@ const drawLyricsDynamicBackground = (timestamp = performance.now()) => {
       y: Math.cos(motionTime * 0.11) * height * 0.035,
       rotation: Math.sin(motionTime * 0.09) * 0.018,
       alpha: 0.92,
-      filter: 'blur(42px) saturate(2.55) brightness(0.62)'
+      filter: `blur(${lyricsDynamicBgProfile.primaryBlur}px) saturate(${lyricsDynamicBgProfile.primarySaturation}) brightness(${lyricsDynamicBgProfile.primaryBrightness})`
     });
 
     drawCoverToCanvas(ctx, image, width, height, {
@@ -1230,19 +1256,19 @@ const drawLyricsDynamicBackground = (timestamp = performance.now()) => {
       x: Math.cos(motionTime * 0.17) * width * 0.05,
       y: Math.sin(motionTime * 0.19) * height * 0.04,
       rotation: Math.cos(motionTime * 0.1) * -0.012,
-      alpha: 0.2,
-      filter: 'blur(18px) saturate(2.1) brightness(0.82)'
+      alpha: lyricsDynamicBgProfile.secondaryAlpha,
+      filter: `blur(${lyricsDynamicBgProfile.secondaryBlur}px) saturate(${lyricsDynamicBgProfile.secondarySaturation}) brightness(${lyricsDynamicBgProfile.secondaryBrightness})`
     });
 
     ctx.save();
     ctx.globalCompositeOperation = 'screen';
-    ctx.globalAlpha = 0.12 + Math.sin(motionTime * 0.9) * 0.025 * pulse;
+    ctx.globalAlpha = lyricsDynamicBgProfile.screenAlpha + Math.sin(motionTime * 0.9) * 0.018 * pulse;
     drawCoverToCanvas(ctx, image, width, height, {
       scale: 2.1,
       x: Math.sin(motionTime * 0.31) * width * 0.09,
       y: Math.cos(motionTime * 0.27) * height * 0.07,
       rotation: Math.sin(motionTime * 0.16) * 0.04,
-      filter: 'blur(70px) saturate(3) brightness(0.78)'
+      filter: `blur(${lyricsDynamicBgProfile.screenBlur}px) saturate(${lyricsDynamicBgProfile.screenSaturation}) brightness(${lyricsDynamicBgProfile.screenBrightness})`
     });
     ctx.restore();
   }
@@ -1297,6 +1323,7 @@ const drawLyricsDynamicBackground = (timestamp = performance.now()) => {
 const startLyricsDynamicBackground = () => {
   if (!lyricsDynamicBg || lyricsDynamicBgState.rafId) return;
   lyricsDynamicBgState.startedAt = performance.now();
+  lyricsDynamicBgState.lastFrameAt = 0;
   lyricsDynamicBgState.rafId = requestAnimationFrame(drawLyricsDynamicBackground);
 };
 
@@ -1304,6 +1331,7 @@ const stopLyricsDynamicBackground = () => {
   if (!lyricsDynamicBgState.rafId) return;
   cancelAnimationFrame(lyricsDynamicBgState.rafId);
   lyricsDynamicBgState.rafId = null;
+  lyricsDynamicBgState.lastFrameAt = 0;
 };
 
 const loadLyricsDynamicBackgroundImage = (coverUrl, retryWithoutCors = false) => {
