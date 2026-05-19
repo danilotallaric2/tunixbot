@@ -1711,9 +1711,9 @@ input[type='range']::-moz-range-thumb {
   background-position: center;
   background-repeat: no-repeat;
   background-size: cover;
-  filter: blur(54px) saturate(2.15) brightness(0.58);
+  filter: blur(62px) saturate(2.35) brightness(0.62);
   transform: scale(1.18);
-  animation: lyrics-ambient-drift 18s ease-in-out infinite alternate;
+  animation: lyrics-ambient-drift 14s ease-in-out infinite alternate;
 }
 
 #lyricsPanel .spicy-lyrics-card::after {
@@ -1738,12 +1738,52 @@ input[type='range']::-moz-range-thumb {
   }
 }
 
+@keyframes lyrics-cover-flow {
+  0% {
+    background-position:
+      10% 12%,
+      86% 88%,
+      center,
+      48% 45%;
+    background-size:
+      74% 74%,
+      82% 82%,
+      auto,
+      146% 146%;
+  }
+  45% {
+    background-position:
+      18% 20%,
+      76% 78%,
+      center,
+      56% 52%;
+    background-size:
+      92% 92%,
+      68% 68%,
+      auto,
+      168% 168%;
+  }
+  100% {
+    background-position:
+      8% 72%,
+      92% 20%,
+      center,
+      44% 58%;
+    background-size:
+      82% 82%,
+      96% 96%,
+      auto,
+      156% 156%;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   #lyricsPanel .spicy-lyrics-card::before {
     animation: none;
   }
 
   #lyricsPanel .lyrics-body {
+    animation: none;
     scroll-behavior: auto;
   }
 
@@ -1776,10 +1816,27 @@ input[type='range']::-moz-range-thumb {
   overflow: auto;
   border: 0;
   border-radius: 22px;
-  background: rgba(0, 0, 0, 0.14);
+  background:
+    radial-gradient(circle at 10% 12%, rgba(255, 255, 255, 0.12), transparent 36%),
+    radial-gradient(circle at 86% 88%, rgba(255, 255, 255, 0.08), transparent 34%),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.46)),
+    var(--lyrics-cover-image);
+  background-repeat: no-repeat;
+  background-size:
+    74% 74%,
+    82% 82%,
+    auto,
+    146% 146%;
+  background-position:
+    10% 12%,
+    86% 88%,
+    center,
+    48% 45%;
+  background-blend-mode: soft-light, soft-light, normal, normal;
   padding: 0 18px;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.35) transparent;
+  animation: lyrics-cover-flow 20s ease-in-out infinite alternate;
   scroll-behavior: smooth;
   scroll-padding-block: 22vh;
   -webkit-mask-image: linear-gradient(
