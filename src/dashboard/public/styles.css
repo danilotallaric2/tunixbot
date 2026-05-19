@@ -1696,94 +1696,46 @@ input[type='range']::-moz-range-thumb {
   padding: clamp(20px, 2vw, 28px);
   border-radius: 26px;
   overflow: hidden;
-  background:
-    linear-gradient(145deg, rgba(10, 10, 14, 0.48), rgba(4, 4, 8, 0.8)),
-    rgba(7, 7, 11, 0.98);
+  background: #060609;
   border-color: rgba(255, 255, 255, 0.18);
 }
 
-#lyricsPanel .spicy-lyrics-card::before {
-  content: "";
+#lyricsPanel .lyrics-dynamic-bg {
   position: absolute;
-  inset: -18%;
-  z-index: -2;
-  background-image: var(--lyrics-cover-image);
-  background-position: center;
-  background-repeat: no-repeat;
-  background-size: cover;
-  filter: blur(62px) saturate(2.35) brightness(0.62);
-  transform: scale(1.18);
-  animation: lyrics-ambient-drift 14s ease-in-out infinite alternate;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.98;
+  pointer-events: none;
 }
 
+#lyricsPanel .spicy-lyrics-card::before,
 #lyricsPanel .spicy-lyrics-card::after {
   content: "";
   position: absolute;
   inset: 0;
-  z-index: -1;
-  background:
-    radial-gradient(circle at 18% 8%, rgba(255, 255, 255, 0.12), transparent 34%),
-    radial-gradient(circle at 82% 88%, rgba(255, 255, 255, 0.08), transparent 34%),
-    linear-gradient(180deg, rgba(0, 0, 0, 0.16), rgba(0, 0, 0, 0.66)),
-    linear-gradient(90deg, rgba(0, 0, 0, 0.22), rgba(0, 0, 0, 0.72));
+  z-index: 1;
   pointer-events: none;
 }
 
-@keyframes lyrics-ambient-drift {
-  from {
-    transform: scale(1.18) translate3d(-1.5%, -1%, 0);
-  }
-  to {
-    transform: scale(1.25) translate3d(1.5%, 1%, 0);
-  }
+#lyricsPanel .spicy-lyrics-card::before {
+  background:
+    radial-gradient(circle at 22% 16%, rgba(255, 255, 255, 0.08), transparent 32%),
+    radial-gradient(circle at 72% 82%, rgba(255, 255, 255, 0.06), transparent 34%);
+  mix-blend-mode: screen;
+  opacity: 0.52;
 }
 
-@keyframes lyrics-cover-flow {
-  0% {
-    background-position:
-      10% 12%,
-      86% 88%,
-      center,
-      48% 45%;
-    background-size:
-      74% 74%,
-      82% 82%,
-      auto,
-      146% 146%;
-  }
-  45% {
-    background-position:
-      18% 20%,
-      76% 78%,
-      center,
-      56% 52%;
-    background-size:
-      92% 92%,
-      68% 68%,
-      auto,
-      168% 168%;
-  }
-  100% {
-    background-position:
-      8% 72%,
-      92% 20%,
-      center,
-      44% 58%;
-    background-size:
-      82% 82%,
-      96% 96%,
-      auto,
-      156% 156%;
-  }
+#lyricsPanel .spicy-lyrics-card::after {
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, 0.24), rgba(0, 0, 0, 0.72)),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0.76)),
+    radial-gradient(circle at 52% 52%, transparent 0, rgba(0, 0, 0, 0.38) 76%);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  #lyricsPanel .spicy-lyrics-card::before {
-    animation: none;
-  }
-
   #lyricsPanel .lyrics-body {
-    animation: none;
     scroll-behavior: auto;
   }
 
@@ -1795,7 +1747,7 @@ input[type='range']::-moz-range-thumb {
 #lyricsPanel .lyrics-head,
 #lyricsPanel .lyrics-layout {
   position: relative;
-  z-index: 1;
+  z-index: 2;
 }
 
 #lyricsPanel .lyrics-head {
@@ -1816,27 +1768,10 @@ input[type='range']::-moz-range-thumb {
   overflow: auto;
   border: 0;
   border-radius: 22px;
-  background:
-    radial-gradient(circle at 10% 12%, rgba(255, 255, 255, 0.12), transparent 36%),
-    radial-gradient(circle at 86% 88%, rgba(255, 255, 255, 0.08), transparent 34%),
-    linear-gradient(90deg, rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.46)),
-    var(--lyrics-cover-image);
-  background-repeat: no-repeat;
-  background-size:
-    74% 74%,
-    82% 82%,
-    auto,
-    146% 146%;
-  background-position:
-    10% 12%,
-    86% 88%,
-    center,
-    48% 45%;
-  background-blend-mode: soft-light, soft-light, normal, normal;
+  background: rgba(0, 0, 0, 0.12);
   padding: 0 18px;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.35) transparent;
-  animation: lyrics-cover-flow 20s ease-in-out infinite alternate;
   scroll-behavior: smooth;
   scroll-padding-block: 22vh;
   -webkit-mask-image: linear-gradient(

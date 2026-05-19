@@ -72,6 +72,7 @@ const refreshBtn = document.getElementById('refreshBtn');
 const lyricsBtn = document.getElementById('lyricsBtn');
 const effectsBtn = document.getElementById('effectsBtn');
 const lyricsPanel = document.getElementById('lyricsPanel');
+const lyricsDynamicBg = document.getElementById('lyricsDynamicBg');
 const lyricsCloseBtn = document.getElementById('lyricsCloseBtn');
 const lyricsBody = document.getElementById('lyricsBody');
 const lyricsLinesWrap = document.getElementById('lyricsLines');
@@ -142,6 +143,13 @@ let spotifyPlaylistNextOffset = null;
 const lyricsCache = new Map();
 const lyricsInflight = new Map();
 const LYRICS_CACHE_MAX_ENTRIES = 80;
+const lyricsDynamicBgState = {
+  coverUrl: '',
+  image: null,
+  rafId: null,
+  startedAt: 0,
+  reducedMotion: window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches || false
+};
 
 const markLyricsBackwardSyncWindow = (ms = 2200) => {
   lyricsBackwardSyncUntilTs = Date.now() + Math.max(250, Number(ms) || 0);
@@ -1144,12 +1152,198 @@ const setLyricsOpen = (open) => {
   lyricsOpen = open;
   if (lyricsOpen) lyricsPanel.classList.remove('hidden');
   else lyricsPanel.classList.add('hidden');
+
+  if (lyricsOpen) startLyricsDynamicBackground();
+  else stopLyricsDynamicBackground();
+};
+
+const resizeLyricsDynamicBackground = () => {
+  if (!lyricsDynamicBg) return { width: 0, height: 0, ratio: 1 };
+
+  const rect = lyricsDynamicBg.getBoundingClientRect();
+  const ratio = Math.min(window.devicePixelRatio || 1, 2);
+  const width = Math.max(1, Math.round(rect.width * ratio));
+  const height = Math.max(1, Math.round(rect.height * ratio));
+
+  if (lyricsDynamicBg.width !== width || lyricsDynamicBg.height !== height) {
+    lyricsDynamicBg.width = width;
+    lyricsDynamicBg.height = height;
+  }
+
+  return { width, height, ratio };
+};
+
+const drawCoverToCanvas = (ctx, image, width, height, options = {}) => {
+  const imageWidth = image.naturalWidth || image.width || 1;
+  const imageHeight = image.naturalHeight || image.height || 1;
+  const scale = Math.max(width / imageWidth, height / imageHeight) * (options.scale || 1);
+  const drawWidth = imageWidth * scale;
+  const drawHeight = imageHeight * scale;
+
+  ctx.save();
+  ctx.globalAlpha = options.alpha ?? 1;
+  ctx.filter = options.filter || 'none';
+  ctx.translate(width / 2, height / 2);
+  ctx.rotate(options.rotation || 0);
+  ctx.drawImage(
+    image,
+    -drawWidth / 2 + (options.x || 0),
+    -drawHeight / 2 + (options.y || 0),
+    drawWidth,
+    drawHeight
+  );
+  ctx.restore();
+};
+
+const drawLyricsDynamicBackground = (timestamp = performance.now()) => {
+  if (!lyricsDynamicBg) return;
+
+  const ctx = lyricsDynamicBg.getContext('2d');
+  if (!ctx) return;
+
+  const { width, height } = resizeLyricsDynamicBackground();
+  if (!width || !height) return;
+
+  const image = lyricsDynamicBgState.image;
+  const elapsed = ((timestamp - lyricsDynamicBgState.startedAt) || 0) / 1000;
+  const progressMs = state?.current ? getLiveProgressMs() : 0;
+  const songTime = progressMs / 1000;
+  const motionTime = lyricsDynamicBgState.reducedMotion ? 0 : elapsed + songTime * 0.08;
+  const pulse = state?.paused ? 0.18 : 1;
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = '#07070a';
+  ctx.fillRect(0, 0, width, height);
+
+  if (image) {
+    drawCoverToCanvas(ctx, image, width, height, {
+      scale: 1.62 + Math.sin(motionTime * 0.18) * 0.045,
+      x: Math.sin(motionTime * 0.13) * width * 0.035,
+      y: Math.cos(motionTime * 0.11) * height * 0.035,
+      rotation: Math.sin(motionTime * 0.09) * 0.018,
+      alpha: 0.92,
+      filter: 'blur(42px) saturate(2.55) brightness(0.62)'
+    });
+
+    drawCoverToCanvas(ctx, image, width, height, {
+      scale: 1.12 + Math.sin(motionTime * 0.22) * 0.03,
+      x: Math.cos(motionTime * 0.17) * width * 0.05,
+      y: Math.sin(motionTime * 0.19) * height * 0.04,
+      rotation: Math.cos(motionTime * 0.1) * -0.012,
+      alpha: 0.2,
+      filter: 'blur(18px) saturate(2.1) brightness(0.82)'
+    });
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = 0.12 + Math.sin(motionTime * 0.9) * 0.025 * pulse;
+    drawCoverToCanvas(ctx, image, width, height, {
+      scale: 2.1,
+      x: Math.sin(motionTime * 0.31) * width * 0.09,
+      y: Math.cos(motionTime * 0.27) * height * 0.07,
+      rotation: Math.sin(motionTime * 0.16) * 0.04,
+      filter: 'blur(70px) saturate(3) brightness(0.78)'
+    });
+    ctx.restore();
+  }
+
+  const glowA = ctx.createRadialGradient(
+    width * (0.22 + Math.sin(motionTime * 0.16) * 0.06),
+    height * (0.2 + Math.cos(motionTime * 0.13) * 0.05),
+    0,
+    width * 0.24,
+    height * 0.22,
+    width * 0.56
+  );
+  glowA.addColorStop(0, 'rgba(255,255,255,0.12)');
+  glowA.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = glowA;
+  ctx.fillRect(0, 0, width, height);
+
+  const glowB = ctx.createRadialGradient(
+    width * (0.86 + Math.cos(motionTime * 0.12) * 0.05),
+    height * (0.88 + Math.sin(motionTime * 0.14) * 0.05),
+    0,
+    width * 0.82,
+    height * 0.84,
+    width * 0.62
+  );
+  glowB.addColorStop(0, 'rgba(255,255,255,0.08)');
+  glowB.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = glowB;
+  ctx.fillRect(0, 0, width, height);
+
+  const verticalShade = ctx.createLinearGradient(0, 0, 0, height);
+  verticalShade.addColorStop(0, 'rgba(0,0,0,0.12)');
+  verticalShade.addColorStop(0.48, 'rgba(0,0,0,0.3)');
+  verticalShade.addColorStop(1, 'rgba(0,0,0,0.72)');
+  ctx.fillStyle = verticalShade;
+  ctx.fillRect(0, 0, width, height);
+
+  const horizontalShade = ctx.createLinearGradient(0, 0, width, 0);
+  horizontalShade.addColorStop(0, 'rgba(0,0,0,0.06)');
+  horizontalShade.addColorStop(0.68, 'rgba(0,0,0,0.2)');
+  horizontalShade.addColorStop(1, 'rgba(0,0,0,0.68)');
+  ctx.fillStyle = horizontalShade;
+  ctx.fillRect(0, 0, width, height);
+
+  if (lyricsOpen && !lyricsDynamicBgState.reducedMotion) {
+    lyricsDynamicBgState.rafId = requestAnimationFrame(drawLyricsDynamicBackground);
+  } else {
+    lyricsDynamicBgState.rafId = null;
+  }
+};
+
+const startLyricsDynamicBackground = () => {
+  if (!lyricsDynamicBg || lyricsDynamicBgState.rafId) return;
+  lyricsDynamicBgState.startedAt = performance.now();
+  lyricsDynamicBgState.rafId = requestAnimationFrame(drawLyricsDynamicBackground);
+};
+
+const stopLyricsDynamicBackground = () => {
+  if (!lyricsDynamicBgState.rafId) return;
+  cancelAnimationFrame(lyricsDynamicBgState.rafId);
+  lyricsDynamicBgState.rafId = null;
+};
+
+const loadLyricsDynamicBackgroundImage = (coverUrl, retryWithoutCors = false) => {
+  lyricsDynamicBgState.coverUrl = coverUrl || '';
+  lyricsDynamicBgState.image = null;
+  stopLyricsDynamicBackground();
+
+  if (!coverUrl) {
+    drawLyricsDynamicBackground();
+    return;
+  }
+
+  const image = new Image();
+  image.decoding = 'async';
+  if (!retryWithoutCors) image.crossOrigin = 'anonymous';
+
+  image.onload = () => {
+    if (lyricsDynamicBgState.coverUrl !== coverUrl) return;
+    lyricsDynamicBgState.image = image;
+    drawLyricsDynamicBackground();
+  };
+
+  image.onerror = () => {
+    if (!retryWithoutCors) {
+      loadLyricsDynamicBackgroundImage(coverUrl, true);
+      return;
+    }
+    drawLyricsDynamicBackground();
+  };
+
+  image.src = coverUrl;
 };
 
 const setLyricsAmbientCover = (coverUrl) => {
   const safeCoverUrl = String(coverUrl || '').replace(/["\\]/g, '\\$&');
   lyricsPanel.style.setProperty('--lyrics-cover-image', safeCoverUrl ? `url("${safeCoverUrl}")` : 'none');
   lyricsPanel.classList.toggle('has-cover', Boolean(safeCoverUrl));
+  if (lyricsDynamicBgState.coverUrl !== (coverUrl || '')) {
+    loadLyricsDynamicBackgroundImage(coverUrl || '');
+  }
 };
 
 const setEffectsOpen = (open) => {
